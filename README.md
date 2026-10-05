@@ -2,7 +2,7 @@
 
 A Cyberpunk 2077 mod for swapping between multiple sets of arm cyberware on the fly, without opening the cyberware menu.
 
-Current version: **2.0**
+Current version: **2.0.1**
 
 ## Features
 
@@ -31,6 +31,10 @@ With only one arm cyberware equipped, the game behaves exactly as it does withou
 Copy `SimpleArmSwapper.reds` into `r6/scripts` in your Cyberpunk 2077 folder.
 
 ## Changelog
+
+### 2.0.1
+
+- Internal tidying up. No changes to how the mod behaves.
 
 ### 2.0
 

@@ -1,5 +1,5 @@
 // r6/scripts/SimpleArmSwapper.reds
-// Simple Arm Swapper v2.0
+// Simple Arm Swapper v2.0.1
 
 public class SimpleArmSwapper extends ScriptableSystem {
 
