@@ -28,7 +28,13 @@ With only one arm cyberware equipped, the game behaves exactly as it does withou
 
 ## Installation
 
-Copy `SimpleArmSwapper.reds` into `r6/scripts` in your Cyberpunk 2077 folder.
+Create a `simple_arm_swapper` folder inside `r6/scripts` in your Cyberpunk 2077 folder and copy `SimpleArmSwapper.reds` into it:
+
+```
+Cyberpunk 2077/r6/scripts/simple_arm_swapper/SimpleArmSwapper.reds
+```
+
+If you are updating from an older version, delete the old `r6/scripts/SimpleArmSwapper.reds` first. Having both copies installed will stop the game's scripts from compiling.
 
 ## Changelog
 
