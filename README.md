@@ -2,7 +2,7 @@
 
 A Cyberpunk 2077 mod for swapping between multiple sets of arm cyberware on the fly, without visiting a Ripperdoc.
 
-Current version: **2.0.1**
+Current version: **2.1**
 
 ## Features
 
@@ -19,7 +19,7 @@ Empty arm slots are skipped, and arm cyberware that is not a melee weapon (such 
 ## Requirements
 
 - [Cyberware-EX](https://github.com/psiberx/cp2077-cyberware-ex)
-- Any mod that adds more arm cyberware slots. Cyberware-EX does not add arm slots on its own, and you need at least two.
+- Any mod that adds more arm cyberware slots. Cyberware-EX does not add arm slots on its own, and you need at least two. This includes Cyberware-EX slot configurations that unlock an extra arm slot: Simple Arm Swapper works as the arm swapper for those.
 - [Mod Settings](https://github.com/jackhumbert/mod_settings)
 - [redscript](https://github.com/jac3km4/redscript) and [RED4ext](https://github.com/WopsS/RED4ext), which the mods above already need
 
@@ -35,7 +35,16 @@ Cyberpunk 2077/r6/scripts/simple_arm_swapper/SimpleArmSwapper.reds
 
 If you are updating from an older version, delete the old `r6/scripts/SimpleArmSwapper.reds` first. Having both copies installed will stop the game's scripts from compiling.
 
+## For mod authors
+
+Other scripts can check that Simple Arm Swapper is installed with `@if(ModuleExists("SimpleArmSwapperMod"))`. The module also provides `Version()`, which returns the version as a string.
+
 ## Changelog
+
+### 2.1
+
+- The script now declares a module, so other mods can detect Simple Arm Swapper.
+- No changes to how the mod behaves. The Mod Settings option may return to its default once after updating.
 
 ### 2.0.1
 

@@ -1,5 +1,10 @@
 // r6/scripts/simple_arm_swapper/SimpleArmSwapper.reds
-// Simple Arm Swapper v2.0.1
+// Simple Arm Swapper v2.1
+
+// Other mods can detect this one with @if(ModuleExists("SimpleArmSwapperMod"))
+module SimpleArmSwapperMod
+
+public func Version() -> String = "2.1"
 
 public class SimpleArmSwapper extends ScriptableSystem {
 
@@ -154,7 +159,7 @@ protected cb func OnAction(action: ListenerAction, consumer: ListenerActionConsu
     let actionType: gameinputActionType = ListenerAction.GetType(action);
 
     if (Equals(actionName, n"WeaponSlot4") || Equals(actionName, n"CycleArmCyberware")) && Equals(actionType, gameinputActionType.BUTTON_PRESSED) {
-        let swapper: ref<SimpleArmSwapper> = GameInstance.GetScriptableSystemsContainer(this.GetGame()).Get(n"SimpleArmSwapper") as SimpleArmSwapper;
+        let swapper: ref<SimpleArmSwapper> = GameInstance.GetScriptableSystemsContainer(this.GetGame()).Get(n"SimpleArmSwapperMod.SimpleArmSwapper") as SimpleArmSwapper;
         if IsDefined(swapper) {
             swapper.SwapToNextArms(this);
         }
@@ -176,7 +181,7 @@ private let m_armSwapperSelected: ItemID;
 
 @addMethod(RadialWheelController)
 private func GetArmSwapper() -> ref<SimpleArmSwapper> {
-    return GameInstance.GetScriptableSystemsContainer(this.GetPlayer().GetGame()).Get(n"SimpleArmSwapper") as SimpleArmSwapper;
+    return GameInstance.GetScriptableSystemsContainer(this.GetPlayer().GetGame()).Get(n"SimpleArmSwapperMod.SimpleArmSwapper") as SimpleArmSwapper;
 }
 
 // Every Meleeware followed by bare fists (when fists are a separate item). Empty when there is nothing extra to cycle,
