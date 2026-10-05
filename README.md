@@ -1,6 +1,6 @@
 # Simple Arm Swapper
 
-A Cyberpunk 2077 mod for swapping between multiple sets of arm cyberware on the fly, without opening the cyberware menu.
+A Cyberpunk 2077 mod for swapping between multiple sets of arm cyberware on the fly, without visiting a Ripperdoc.
 
 Current version: **2.0.1**
 
