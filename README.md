@@ -18,11 +18,10 @@ Empty arm slots are skipped, and arm cyberware that is not a melee weapon (such 
 
 ## Requirements
 
-- [Cyberware-EX](https://github.com/psiberx/cp2077-cyberware-ex), for more than one arm cyberware slot
+- [Cyberware-EX](https://github.com/psiberx/cp2077-cyberware-ex)
+- Any mod that adds more arm cyberware slots. Cyberware-EX does not add arm slots on its own, and you need at least two.
 - [Mod Settings](https://github.com/jackhumbert/mod_settings)
 - [redscript](https://github.com/jac3km4/redscript) and [RED4ext](https://github.com/WopsS/RED4ext), which the mods above already need
-
-Optional: The Flesh Is Weak adds even more cyberware slots on top of Cyberware-EX, and works with this mod.
 
 With only one arm cyberware equipped, the game behaves exactly as it does without the mod.
 
