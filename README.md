@@ -39,6 +39,10 @@ If you are updating from an older version, delete the old `r6/scripts/SimpleArmS
 
 Other scripts can check that Simple Arm Swapper is installed with `@if(ModuleExists("SimpleArmSwapperMod"))`. The module also provides `Version()`, which returns the version as a string.
 
+## License
+
+Released under the [MIT License](LICENSE).
+
 ## Changelog
 
 ### 2.1
