@@ -1,0 +1,51 @@
+# Read-only: prints how Nexus Mods lists this mod's files and their versions.
+#
+# Useful for finding the right file ID before running "Upload to Nexus Mods".
+# It changes nothing on Nexus. Uses the same NEXUSMODS_API_KEY secret and
+# NEXUSMODS_MOD_ID variable as the upload workflow.
+name: List Nexus Mods files
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  list:
+    runs-on: ubuntu-latest
+    steps:
+      - name: List the mod's files and versions
+        env:
+          API_KEY: ${{ secrets.NEXUSMODS_API_KEY }}
+          MOD_ID: ${{ vars.NEXUSMODS_MOD_ID }}
+          API: https://api.nexusmods.com/v3
+        run: |
+          if [ -z "$API_KEY" ]; then
+            echo "::error::Repository secret NEXUSMODS_API_KEY is not set"
+            exit 1
+          fi
+          if [ -z "$MOD_ID" ]; then
+            echo "::error::Repository variable NEXUSMODS_MOD_ID is not set"
+            exit 1
+          fi
+          get() {
+            curl --silent --show-error --max-time 30 \
+              -H "apikey: $API_KEY" \
+              -H "Accept: application/json" \
+              -H "User-Agent: SimpleArmSwapper-list-files" \
+              -w '\n%{http_code}' "$API$1"
+          }
+          show() {
+            response="$(get "$1")"
+            status="$(printf '%s' "$response" | tail -n 1)"
+            body="$(printf '%s' "$response" | sed '$d')"
+            echo "=== GET $1 (HTTP $status)"
+            printf '%s' "$body" | jq . 2>/dev/null || printf '%s\n' "$body"
+            echo
+          }
+          show "/mods/$MOD_ID/files"
+          files="$(get "/mods/$MOD_ID/files" | sed '$d')"
+          for id in $(printf '%s' "$files" | jq -r '.. | objects | select(has("id") and (has("name") or has("file_category"))) | .id' 2>/dev/null | sort -u); do
+            show "/mod-files/$id"
+            show "/mod-files/$id/versions"
+          done

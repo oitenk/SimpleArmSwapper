@@ -1,0 +1,109 @@
+# Uploads a new version of the mod's main file to Nexus Mods.
+#
+# Runs only when started by hand from the Actions tab. It zips the r6 folder,
+# takes that version's notes from CHANGELOG.md, and adds the zip as a new
+# version of the main file on the mod page.
+#
+# Repository settings this needs (Settings > Secrets and variables > Actions):
+#   Secret    NEXUSMODS_API_KEY          from nexusmods.com/settings/api-keys
+#   Variable  NEXUSMODS_MOD_ID           "Unique Mod ID" from a file's Advanced panel
+#   Variable  NEXUSMODS_MAIN_FILE_ID     ID of the main file (take it from "List Nexus Mods files")
+name: Upload to Nexus Mods
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to publish. Must have an entry in CHANGELOG.md (for example 2.2)
+        type: string
+        required: true
+      update_mod_version:
+        description: Also set the mod page's version number to this
+        type: boolean
+        default: true
+      # Nexus can only archive through its API, and archived versions cannot be
+      # downloaded. Left off, the previous version stays up; move it to "Old files"
+      # on the Nexus site afterwards.
+      archive_previous:
+        description: Archive the file's previous version (hides it from downloads; this is not "Old files")
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Check the settings
+        id: package
+        env:
+          VERSION: ${{ inputs.version }}
+          MOD_ID: ${{ vars.NEXUSMODS_MOD_ID }}
+          FILE_ID: ${{ vars.NEXUSMODS_MAIN_FILE_ID }}
+        run: |
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+(\.[0-9]+){1,2}$'; then
+            echo "::error::Version '$VERSION' should look like 2.2 or 2.2.1"
+            exit 1
+          fi
+          if [ -z "$MOD_ID" ]; then
+            echo "::error::Repository variable NEXUSMODS_MOD_ID is not set"
+            exit 1
+          fi
+          if [ -z "$FILE_ID" ]; then
+            echo "::error::Repository variable NEXUSMODS_MAIN_FILE_ID is not set"
+            exit 1
+          fi
+          echo "zip_name=SimpleArmSwapper-$VERSION.zip" >> "$GITHUB_OUTPUT"
+
+      # The notes players see come from CHANGELOG.md, not from commit messages.
+      - name: Read the changelog entry
+        id: changelog
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          notes="$(awk -v heading="## $VERSION" '
+            $0 == heading { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md | sed -e '/./,$!d')"
+          if [ -z "$(printf '%s' "$notes" | tr -d '[:space:]')" ]; then
+            echo "::error::CHANGELOG.md has no entry under '## $VERSION'. Add one before uploading."
+            exit 1
+          fi
+          {
+            echo "notes<<SAS_CHANGELOG_END"
+            printf '%s\n' "$notes"
+            echo "SAS_CHANGELOG_END"
+          } >> "$GITHUB_OUTPUT"
+          echo "Changelog for $VERSION:"
+          printf '%s\n' "$notes"
+
+      # The package is laid out from the game root.
+      - name: Build the zip
+        env:
+          ZIP_NAME: ${{ steps.package.outputs.zip_name }}
+        run: |
+          zip -r "$ZIP_NAME" r6
+          unzip -l "$ZIP_NAME"
+
+      - name: Upload to Nexus Mods
+        # v1.0.0-beta.10
+        uses: Nexus-Mods/upload-action@c96019556046053aa26044b44396cd38929daf23
+        with:
+          api_key: ${{ secrets.NEXUSMODS_API_KEY }}
+          mod_id: ${{ vars.NEXUSMODS_MOD_ID }}
+          file_id: ${{ vars.NEXUSMODS_MAIN_FILE_ID }}
+          filename: ${{ steps.package.outputs.zip_name }}
+          display_name: Simple Arm Swapper
+          description: Swap between multiple sets of arm cyberware with the 4 key or the weapon wheel.
+          version: ${{ inputs.version }}
+          category: main
+          primary_mod_manager_download: true
+          archive_existing_version: ${{ inputs.archive_previous }}
+          update_mod_version: ${{ inputs.update_mod_version }}
+          changelog: ${{ steps.changelog.outputs.notes }}

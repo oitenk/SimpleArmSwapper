@@ -1,26 +1,24 @@
 // r6/scripts/simple_arm_swapper/SimpleArmSwapper.reds
-// Simple Arm Swapper v2.1
+// Simple Arm Swapper v2.2
 
 // Other mods can detect this one with @if(ModuleExists("SimpleArmSwapperMod"))
 module SimpleArmSwapperMod
 
-public func Version() -> String = "2.1"
+public func Version() -> String = "2.2"
 
-public class SimpleArmSwapper extends ScriptableSystem {
+// Options shown in the Mod Settings menu. Mod Settings is optional: when it is installed it
+// writes the saved choice into this class's default values (at startup and whenever the
+// option changes), so a freshly created instance always holds the current setting. Without
+// Mod Settings the defaults below are used.
+public class SimpleArmSwapperSettings {
 
     @runtimeProperty("ModSettings.mod", "Simple Arm Swapper")
     @runtimeProperty("ModSettings.displayName", "Weapon Wheel Shows Next Arms")
     @runtimeProperty("ModSettings.description", "While arm cyberware is drawn, the weapon wheel's cyberware slot starts on the next arms in line, so selecting it swaps right away. Turn off to have it start on the arms you are holding.")
     public let wheelShowsNextArms: Bool = true;
+}
 
-    // Keeps the settings above in sync with the Mod Settings menu
-    private func OnAttach() -> Void {
-        ModSettings.RegisterListenerToClass(this);
-    }
-
-    private func OnDetach() -> Void {
-        ModSettings.UnregisterListenerToClass(this);
-    }
+public class SimpleArmSwapper extends ScriptableSystem {
 
     // Returns every equipped arm cyberware carrying the 'Meleeware' tag, in slot order
     public func GetMeleewareItems(player: ref<GameObject>) -> array<ItemID> {
@@ -276,7 +274,7 @@ private final func RefreshCyberware() -> Void {
 
         if ArrayContains(ring, held) && TweakDBInterface.GetItemRecord(ItemID.GetTDBID(held)).TagsContains(n"Meleeware") {
             // Arms are out: offer the next one in line, or the ones in hand, depending on the setting
-            if this.GetArmSwapper().wheelShowsNextArms {
+            if (new SimpleArmSwapperSettings()).wheelShowsNextArms {
                 this.m_armSwapperSelected = this.GetArmSwapperNeighbour(ring, held, true);
             } else {
                 this.m_armSwapperSelected = held;
