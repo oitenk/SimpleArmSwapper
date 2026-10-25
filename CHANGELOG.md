@@ -1,5 +1,27 @@
 # Changelog
 
+## 2.3.1
+
+Projectile Launch System: it still works alongside multiple cyberarms, and fires as normal next to any of them. Its Glamdoc styles do not work while melee arms are also equipped: it shows its default look when fired, then V's arms go back to their own style. This is because the game holds one cyberarm style at a time. A Projectile Launch System on its own can be styled as in the base game.
+
+NEW! Style every melee arm type in one Glamdoc visit. With more than one equipped, the Glamdoc's arm type tabs switch V to those arms, and the preview, current style and colours follow.
+
+NEW! With more than one melee arm type equipped, buying a style keeps the Glamdoc open so the other arms can be styled too. The F key reads "Buy and apply (F again to close)": press it once to buy, and again to apply and close.
+
+NEW! Buying a style or switching arm type locks in what you have done so far, so leaving with Back only undoes changes made after that.
+
+NEW! Debug Logging option in Mod Settings, under Troubleshooting. Off by default.
+
+NEW! The mod's on-screen text can be translated. It goes through Codeware's localization system when Codeware is installed, with English as the fallback.
+
+Arm types you have never styled now show their plain look, instead of taking on another type's style, colours or a white finish.
+
+Arms that come into V's hand always wear their own style, including when the game draws them again by itself after a menu closes.
+
+Fixed two sets of arms showing after closing the Glamdoc with arms drawn.
+
+Fixed some styles you already owned being applied switched off, which hid them and ignored their colours.
+
 ## 2.3
 
 NEW! Third-person arms: while your arms are put away, the inventory, vehicles and mirrors show the arm cyberware you used last, instead of always the arms in the first slot.
@@ -22,7 +44,7 @@ Nothing about how swapping works was changed in this release. The Mod Settings o
 
 ## 2.1
 
-The script now declares a module, so other mods can detect Simple Arm Swapper.
+NEW! The script now declares a module, so other mods can detect Simple Arm Swapper.
 
 No changes to how the mod behaves. The Mod Settings option may return to its default once after updating.
 
@@ -32,13 +54,13 @@ Internal tidying up. No changes to how the mod behaves.
 
 ## 2.0
 
-Added weapon wheel support: the cyberware slot cycles through all equipped arm cyberware and bare fists.
+NEW! Weapon wheel support: the cyberware slot cycles through all equipped arm cyberware and bare fists.
 
-Added arm memory: drawing arms recalls the last used set instead of always the first slot.
+NEW! Arm memory: drawing arms recalls the last used set instead of always the first slot.
 
 The "4" key now only cycles while arms are already drawn; otherwise it draws the last used set.
 
-Added a Mod Settings option for whether the wheel starts on the next arms or the ones in hand.
+NEW! A Mod Settings option for whether the wheel starts on the next arms or the ones in hand.
 
 Fixed Gorilla Arms appearing twice in the wheel rotation, which stopped it cycling in one direction.
 
