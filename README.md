@@ -2,7 +2,7 @@
 
 A Cyberpunk 2077 mod for swapping between multiple sets of arm cyberware on the fly, without visiting a Ripperdoc.
 
-Current version: **2.2**, for Cyberpunk 2077 2.5.
+Current version: **2.3**, for Cyberpunk 2077 2.5.
 
 ## Features
 
@@ -10,9 +10,16 @@ Current version: **2.2**, for Cyberpunk 2077 2.5.
 - **Swap with the weapon wheel.** The wheel's cyberware slot cycles through every equipped arm cyberware and bare fists, in both directions, using the wheel's previous/next keys. Select the slot to draw what it shows.
 - **Arm memory.** Drawing your arms brings back the set you used last, not whatever is in the first slot. This carries across saves.
 - **Gorilla Arms function like vanilla.** They take the place of bare fists, so the wheel offers Gorilla Arms rather than a separate fists entry while they are installed.
-- **Mod Settings option.** With Mod Settings installed, "Weapon Wheel Shows Next Arms" chooses what the wheel's cyberware slot starts on while arms are drawn:
-  - On (default): the next arms in line, so selecting the slot swaps right away.
-  - Off: the arms you are holding, and you cycle from there.
+- **Third-person arms.** While your arms are put away, the inventory, vehicles and mirrors show the arm cyberware you used last.
+- **Glamdoc styles per arm type.** The Glamdoc can style every arm cyberware type you have equipped, not only the one in the first slot. Each type keeps its own style and colours, saved with your game, and switching arms puts the matching style back.
+
+## Mod Settings options
+
+With [Mod Settings](https://github.com/jackhumbert/mod_settings) installed, these appear under "Simple Arm Swapper". Without it, the defaults apply.
+
+- **Weapon Wheel Shows Next Arms** (on by default): while arms are drawn, the wheel's cyberware slot starts on the next arms in line, so selecting it swaps right away. Off: it starts on the arms you are holding.
+- **Show Last Used Arms When Holstered** (on by default): third-person views show your last used arms while they are put away. Off: the game and your other mods decide.
+- **Glamdoc Style Per Arm Type** (on by default): the Glamdoc styles each arm type separately and switching arms puts the matching style back. Off: styling works as in the base game.
 
 Empty arm slots are skipped, and arm cyberware that is not a melee weapon (such as the Projectile Launch System) is left out of the rotation.
 
@@ -24,7 +31,7 @@ Empty arm slots are skipped, and arm cyberware that is not a melee weapon (such 
 
 Optional:
 
-- [Mod Settings](https://github.com/jackhumbert/mod_settings) - adds the option above to the in-game Mod Settings menu. Without it the default applies.
+- [Mod Settings](https://github.com/jackhumbert/mod_settings) - adds the options above to the in-game Mod Settings menu. Without it the defaults apply.
 
 With only one arm cyberware equipped, the game behaves exactly as it does without the mod.
 
