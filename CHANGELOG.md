@@ -1,5 +1,27 @@
 # Changelog
 
+## 2.4
+
+Glamdoc styles now show on every melee arm you have equipped, not only on the arms in the first arm slot. Mantis Blades and Monowire in any slot wear their own style and colours in hand, put away, in photo mode, on the inventory screen and in the Glamdoc preview, for both body types. This part needs Codeware. Without it, arms outside the first slot show their plain look, as before.
+
+MaxTac Mantis Blades, and arm cyberware built on them, now show their Glamdoc style in any slot, and go back to their MaxTac look when the style is removed, without leftover hands or nails. Swapping between MaxTac and regular Mantis Blades keeps each one's own look, and the MaxTac look no longer carries over to other arms.
+
+Arms keep their style on motorcycles and in cars, in both camera views.
+
+The holster key now draws your last used arms from any arm slot, instead of another weapon.
+
+NEW! Bare fists show the arm cyberware you used last, the same way as when you put your arms away.
+
+NEW! The Glamdoc preview shows the style you are previewing for every arm type, and follows each style as you pick it.
+
+Pressing "4" to swap arms no longer unequips a quickhack slotted into the Monowire.
+
+Changing or reordering cyberware at a ripperdoc no longer clears the saved style of arms that stay installed, or leaves overlapping arm parts.
+
+Fixed styles on another arm type's Glamdoc tab sometimes not being selectable, when switching tabs while previewing a style or right after buying one.
+
+Gorilla Arms keep being styled by the game itself, in any slot.
+
 ## 2.3.1
 
 Projectile Launch System: it still works alongside multiple cyberarms, and fires as normal next to any of them. Its Glamdoc styles do not work while melee arms are also equipped: it shows its default look when fired, then V's arms go back to their own style. This is because the game holds one cyberarm style at a time. A Projectile Launch System on its own can be styled as in the base game.

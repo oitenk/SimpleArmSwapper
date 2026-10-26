@@ -2,7 +2,7 @@
 
 A Cyberpunk 2077 mod for swapping between multiple sets of arm cyberware on the fly, without visiting a Ripperdoc.
 
-Current version: **2.3.1**, for Cyberpunk 2077 2.5.
+Current version: **2.4**, for Cyberpunk 2077 2.5.
 
 ## Features
 
@@ -10,8 +10,9 @@ Current version: **2.3.1**, for Cyberpunk 2077 2.5.
 - **Swap with the weapon wheel.** The wheel's cyberware slot cycles through every equipped arm cyberware and bare fists, in both directions, using the wheel's previous/next keys. Select the slot to draw what it shows.
 - **Arm memory.** Drawing your arms brings back the set you used last, not whatever is in the first slot. This carries across saves.
 - **Gorilla Arms function like vanilla.** They take the place of bare fists, so the wheel offers Gorilla Arms rather than a separate fists entry while they are installed.
-- **Third-person arms.** While your arms are put away, the inventory, vehicles and mirrors show the arm cyberware you used last.
+- **Third-person arms.** While your arms are put away, and while you fight with bare fists, the inventory, vehicles and mirrors show the arm cyberware you used last.
 - **Glamdoc styles per arm type.** The Glamdoc can style every melee arm cyberware type you have equipped, in one visit. Each type keeps its own style and colours, saved with your game, and switching arms puts the matching style back.
+- **Styles on every arm slot.** Mantis Blades and Monowire wear their style in any arm slot: in hand, put away, in photo mode, on the inventory screen and in the Glamdoc preview. This includes the MaxTac Mantis Blades and arms built on them. Needs Codeware.
 
 ## Styling several arm types in the Glamdoc
 
@@ -24,6 +25,8 @@ Buying a style or switching arm type locks in what you have done so far, so leav
 
 ## Known limitations
 
+- **If an arm looks off,** for example right after removing a style or changing cyberware at a ripperdoc, save and reload once. That clears most visual hiccups. If it doesn't, please report it with a screenshot (and a log with Debug Logging on, if you can).
+- **Painted nails.** Most Mantis Blade and Monowire styles paint V's fingernails, which replaces V's own nails as in the base game. The painted nails can be missing on Mantis Blades outside the first arm slot. If you plan to remove arm cyberware that has such a style, remove its Glamdoc style first: otherwise the nail choice in the character editor can stay locked after the arms are gone.
 - **Projectile Launch System styles.** The launcher still works alongside multiple cyberarms, and fires as normal next to any of them. Its Glamdoc styles do not work while melee arms are also equipped: it shows its default look when fired, then V's arms go back to their own style. This is because the game holds one cyberarm style at a time. A Projectile Launch System on its own can be styled as in the base game.
 
 ## Mod Settings options
@@ -45,16 +48,18 @@ Empty arm slots are skipped, and arm cyberware that is not a melee weapon (such 
 
 Optional:
 
+- [Codeware](https://github.com/psiberx/cp2077-codeware) - shows Glamdoc styles on Mantis Blades and Monowire outside the first arm slot, and lets the mod's text be translated. Without it those arms show their plain look.
 - [Mod Settings](https://github.com/jackhumbert/mod_settings) - adds the options above to the in-game Mod Settings menu. Without it the defaults apply.
 
 With only one arm cyberware equipped, the game behaves exactly as it does without the mod.
 
 ## Installation
 
-Install the release zip with a mod manager such as Vortex, or copy its `r6` folder into your Cyberpunk 2077 folder. The script ends up here:
+Install the release zip with a mod manager such as Vortex, or copy its `r6` folder into your Cyberpunk 2077 folder. The scripts end up here:
 
 ```
 Cyberpunk 2077/r6/scripts/simple_arm_swapper/SimpleArmSwapper.reds
+Cyberpunk 2077/r6/scripts/simple_arm_swapper/SimpleArmSwapperStyleData.reds
 ```
 
 If you are updating from 1.x, delete the old `r6/scripts/SimpleArmSwapper.reds` first. Having both copies installed will stop the game's scripts from compiling.
