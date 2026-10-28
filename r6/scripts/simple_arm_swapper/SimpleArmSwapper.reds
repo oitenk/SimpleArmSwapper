@@ -1,5 +1,5 @@
 // r6/scripts/simple_arm_swapper/SimpleArmSwapper.reds
-// Simple Arm Swapper v2.3.1
+// Simple Arm Swapper v2.4.1
 
 // Other mods can detect this one with @if(ModuleExists("SimpleArmSwapperMod"))
 module SimpleArmSwapperMod
@@ -7,7 +7,7 @@ module SimpleArmSwapperMod
 @if(ModuleExists("Codeware.Localization"))
 import Codeware.Localization.*
 
-public func Version() -> String = "2.4"
+public func Version() -> String = "2.4.1"
 
 // Options shown in the Mod Settings menu. Mod Settings is optional: when it is installed it
 // writes the saved choice into this class's default values (at startup and whenever the
@@ -380,6 +380,7 @@ public final static func UpdateArmSlot(owner: ref<gamePuppet>, itemToDraw: ItemI
     EquipmentSystemPlayerData.ForceQualityAndDuplicateStatsShard(player, lastUsedArms, holsteredArms);
     equipmentData.EquipItem(holsteredArms, false, false);
     ArmSwapperLog(player.GetGame(), "holstered arms set to " + ArmSwapperName(holsteredArms) + " for " + ArmSwapperName(lastUsedArms));
+    ArmSwapperCheckHeadSoon(player, "holstered arms set");
 }
 
 @wrapMethod(PlayerPuppet)
@@ -388,6 +389,8 @@ protected cb func OnAction(action: ListenerAction, consumer: ListenerActionConsu
     let actionType: gameinputActionType = ListenerAction.GetType(action);
 
     if (Equals(actionName, n"WeaponSlot4") || Equals(actionName, n"CycleArmCyberware")) && Equals(actionType, gameinputActionType.BUTTON_PRESSED) {
+        // Debug: the swap key also records V's head pieces as they are right now
+        ArmSwapperCheckHead(this, "swap key", true);
         let swapper: ref<SimpleArmSwapper> = GameInstance.GetScriptableSystemsContainer(this.GetGame()).Get(n"SimpleArmSwapperMod.SimpleArmSwapper") as SimpleArmSwapper;
         if IsDefined(swapper) {
             swapper.SwapToNextArms(this);
@@ -851,6 +854,7 @@ public func ArmSwapperRefreshMaxTacLook(styled: Bool) {
     if NotEquals(before, this.savedData.hasMaxTacApperanceEquipped) {
         // Put the arms' style back through the matching version
         this.RestoreCyberwareCustomization(true);
+        ArmSwapperCheckHeadSoon(this.m_playerPuppet as PlayerPuppet, "after MaxTac look change");
         ArmSwapperLog(this.GetGameInstance(), "MaxTac look " + (this.savedData.hasMaxTacApperanceEquipped ? "on" : "off")
             + " for " + ArmSwapperName(eqData.GetActiveItem(gamedataEquipmentArea.ArmsCW)));
     }
@@ -867,13 +871,56 @@ public func ArmSwapperTagsText(item: ItemID) -> String {
     return text;
 }
 
+// When V attached (a save loading), in engine time
+@addField(PlayerPuppet)
+public let m_armSwapperAttachTime: Float;
+
+public func ArmSwapperNow(game: GameInstance) -> Float {
+    return EngineTime.ToFloat(GameInstance.GetEngineTime(game));
+}
+
 // The game repeats its MaxTac check whenever the holstered Mantis Blades appear (mounting a bike,
 // for one), which switches the MaxTac look back on over a style. Apply the style rule again
 // straight after, and restyle the arms V is wearing.
+// The game also runs this check while a save is still loading. Switching the look off at that
+// point re-applies V's customization too early, which left V's hair showing in first person
+// with a weapon drawn. During the first moments after a load the switch waits a little.
 @wrapMethod(CyberwareCustomizationSystem)
 private final func OnPotentiallyRefreshMaxTacApperance(request: ref<PotentiallyRefreshMaxTacApperanceRequest>) {
     let before: Bool = this.savedData.hasMaxTacApperanceEquipped;
     wrappedMethod(request);
+    let player: ref<PlayerPuppet> = this.m_playerPuppet as PlayerPuppet;
+    if !IsDefined(player) { return; }
+    let game: GameInstance = this.GetGameInstance();
+    if ArmSwapperNow(game) - player.m_armSwapperAttachTime < 30.0 {
+        ArmSwapperLog(game, "MaxTac check by the game shortly after loading (flag " + BoolToString(before) + " -> "
+            + BoolToString(this.savedData.hasMaxTacApperanceEquipped) + "); applying the style rule in 10 s");
+        let callback: ref<ArmSwapperMaxTacLaterCallback> = new ArmSwapperMaxTacLaterCallback();
+        callback.player = player;
+        callback.before = before;
+        GameInstance.GetDelaySystem(game).DelayCallback(callback, 10.0, false);
+        return;
+    }
+    this.ArmSwapperMaxTacOverStyle(before);
+}
+
+public class ArmSwapperMaxTacLaterCallback extends DelayCallback {
+    public let player: wref<PlayerPuppet>;
+    public let before: Bool;
+
+    public func Call() -> Void {
+        let player: ref<PlayerPuppet> = this.player;
+        if !IsDefined(player) { return; }
+        let system: ref<CyberwareCustomizationSystem> = GameInstance.GetScriptableSystemsContainer(player.GetGame()).Get(n"CyberwareCustomizationSystem") as CyberwareCustomizationSystem;
+        if IsDefined(system) {
+            system.ArmSwapperMaxTacOverStyle(this.before);
+            ArmSwapperCheckHeadSoon(player, "after the MaxTac style rule");
+        }
+    }
+}
+
+@addMethod(CyberwareCustomizationSystem)
+public func ArmSwapperMaxTacOverStyle(before: Bool) {
     if !(new SimpleArmSwapperSettings()).stylePerArmType || !IsDefined(this.m_playerPuppet) { return; }
     let player: ref<PlayerPuppet> = this.m_playerPuppet as PlayerPuppet;
     let eqData: ref<EquipmentSystemPlayerData> = EquipmentSystem.GetData(player);
@@ -967,6 +1014,7 @@ public func ArmSwapperApplyStyleFor(armsItem: ItemID, opt fromGlamdoc: Bool) {
         this.savedData.secondaryColorIndex = Cast<Uint8>(0);
         if NotEquals(ownSwitcher, n"None") {
             this.SetIndexForCustomizationSwitcher(ownSwitcher, Cast<Uint32>(0), true);
+            ArmSwapperCheckHeadSoon(player, "after style switcher reset");
         }
         let noColor: Color;
         this.SetCustomizationParameters(false, noColor, noColor);
@@ -1006,6 +1054,7 @@ public func ArmSwapperApplyStyleFor(armsItem: ItemID, opt fromGlamdoc: Bool) {
     this.savedData.primaryColorIndex = primaryColor;
     this.savedData.secondaryColorIndex = secondaryColor;
     this.RestoreCyberwareCustomization(true);
+    ArmSwapperCheckHeadSoon(player, "after style restore for " + ArmSwapperName(armsItem));
     EquipmentSystem.GetData(player).ArmSwapperSyncStyleItem(styleItem);
     ArmSwapperLog(this.GetGameInstance(), "apply for " + ArmSwapperName(armsItem) + ": " + ArmSwapperStyleDataText(this.savedData) + ". " + ArmSwapperArmsState(player));
 }
@@ -1061,6 +1110,9 @@ private final func OnSaveAndApplyCyberwareCustomizationColorRequest(request: ref
 @wrapMethod(CyberwareCustomizationSystem)
 private final func PlayerAttachedCallback(playerPuppet: ref<GameObject>) {
     wrappedMethod(playerPuppet);
+    let attached: ref<PlayerPuppet> = playerPuppet as PlayerPuppet;
+    if IsDefined(attached) { attached.m_armSwapperAttachTime = ArmSwapperNow(attached.GetGame()); }
+    ArmSwapperStartHeadWatch(attached);
     this.ArmSwapperRememberCurrentStyle();
     this.ArmSwapperApplyStyleForActiveArms();
 }
@@ -1492,6 +1544,193 @@ public func ArmSwapperDumpMeshes(game: GameInstance, owner: ref<Entity>, label: 
 @if(!ModuleExists("Codeware"))
 public func ArmSwapperDumpMeshes(game: GameInstance, owner: ref<Entity>, label: String) {}
 
+// --- Debug probe: V's head, hair and beard pieces (needs Codeware; only runs with Debug Logging on) ---
+// In first person the game hides these or keeps them for shadows only. The mod never changes them;
+// this records their state next to the mod's own arm changes, so a stray head or hair piece in first
+// person can be matched to what happened just before it.
+
+@addField(PlayerPuppet)
+public let m_armSwapperHeadNames: array<String>;
+
+@addField(PlayerPuppet)
+public let m_armSwapperHeadStates: array<String>;
+
+public func ArmSwapperIsHeadPart(name: CName) -> Bool {
+    let n: String = StrLower(NameToString(name));
+    if StrBeginsWith(n, "a0_") { return false; }
+    return StrContains(n, "head") || StrContains(n, "hair") || StrContains(n, "beard") || StrContains(n, "face")
+        || StrContains(n, "shadow") || StrContains(n, "brow") || StrContains(n, "lash")
+        || StrBeginsWith(n, "h0_") || StrBeginsWith(n, "h1_") || StrBeginsWith(n, "hx_") || StrBeginsWith(n, "hh_")
+        || StrBeginsWith(n, "hb_") || StrBeginsWith(n, "he_") || StrBeginsWith(n, "heb_") || StrBeginsWith(n, "ht_");
+}
+
+// What a piece is attached to and skinned to, and its draw settings
+@if(ModuleExists("Codeware"))
+public func ArmSwapperHeadPieceBinding(comp: ref<IComponent>) -> String {
+    let text: String = "";
+    let placed: ref<IPlacedComponent> = comp as IPlacedComponent;
+    if IsDefined(placed) {
+        let parent: ref<entITransformBinding> = placed.parentTransform;
+        if IsDefined(parent) {
+            let hard: ref<entHardTransformBinding> = parent as entHardTransformBinding;
+            text += " parent=" + NameToString(parent.bindName) + (IsDefined(hard) ? "/" + NameToString(hard.slotName) : "") + (parent.enabled ? "" : "(off)");
+        } else {
+            text += " parent=none";
+        }
+    }
+    let skinTarget: ref<entISkinTargetComponent> = comp as entISkinTargetComponent;
+    if IsDefined(skinTarget) {
+        let skin: ref<entSkinningBinding> = skinTarget.skinning;
+        text += IsDefined(skin) ? " skin=" + NameToString(skin.bindName) + (skin.enabled ? "" : "(off)") : " skin=none";
+    }
+    let visual: ref<IVisualComponent> = comp as IVisualComponent;
+    if IsDefined(visual) {
+        text += " lod=" + IntToString(Cast<Int32>(visual.forceLODLevel)) + " autoHide=" + FloatToStringPrec(visual.autoHideDistance, 1);
+    }
+    return text;
+}
+
+@if(ModuleExists("Codeware"))
+public func ArmSwapperHeadPieceState(comp: ref<IComponent>) -> String {
+    let skinned: ref<entSkinnedMeshComponent> = comp as entSkinnedMeshComponent;
+    if IsDefined(skinned) {
+        let meshRef: ResourceAsyncRef = skinned.mesh;
+        return "skinned mesh=" + ResRef.ToString(ResourceAsyncRef.GetPath(meshRef)) + " app=" + NameToString(skinned.meshAppearance)
+            + " on=" + BoolToString(comp.IsEnabled()) + " mask=" + s"\(skinned.chunkMask)"
+            + " shadows=" + IntToString(EnumInt(skinned.castShadows)) + "/" + IntToString(EnumInt(skinned.castLocalShadows))
+            + " visParam=" + NameToString(skinned.visibilityAnimationParam) + " planeParam=" + NameToString(skinned.renderingPlaneAnimationParam)
+            + ArmSwapperHeadPieceBinding(comp);
+    }
+    let plain: ref<MeshComponent> = comp as MeshComponent;
+    if IsDefined(plain) {
+        let plainRef: ResourceAsyncRef = plain.mesh;
+        return "mesh mesh=" + ResRef.ToString(ResourceAsyncRef.GetPath(plainRef)) + " app=" + NameToString(plain.meshAppearance)
+            + " on=" + BoolToString(comp.IsEnabled()) + " mask=" + s"\(plain.chunkMask)"
+            + " shadows=" + IntToString(EnumInt(plain.castShadows)) + "/" + IntToString(EnumInt(plain.castLocalShadows))
+            + " plane=" + IntToString(EnumInt(plain.renderingPlane)) + ArmSwapperHeadPieceBinding(comp);
+    }
+    return "";
+}
+
+// Logs V's head, hair and beard pieces: all of them when full is set, otherwise only the ones that
+// appeared, changed or went away since the last check
+@if(ModuleExists("Codeware"))
+public func ArmSwapperCheckHead(player: ref<PlayerPuppet>, label: String, opt full: Bool) {
+    if !(new SimpleArmSwapperSettings()).debugLogging || !IsDefined(player) { return; }
+    let game: GameInstance = player.GetGame();
+    let names: array<String>;
+    let states: array<String>;
+    let changes: Int32 = 0;
+    for comp in player.GetComponents() {
+        if IsDefined(comp) && ArmSwapperIsHeadPart(comp.GetName()) {
+            let state: String = ArmSwapperHeadPieceState(comp);
+            if NotEquals(state, "") {
+                let name: String = NameToString(comp.GetName());
+                // Several pieces can share a name: number the copies
+                let copy: Int32 = 0;
+                for seen in names { if Equals(seen, name) { copy += 1; } }
+                if copy > 0 { name += "#" + IntToString(copy); }
+                ArrayPush(names, name);
+                ArrayPush(states, state);
+                let before: Int32 = -1;
+                let i: Int32 = 0;
+                while i < ArraySize(player.m_armSwapperHeadNames) {
+                    if Equals(player.m_armSwapperHeadNames[i], name) { before = i; }
+                    i += 1;
+                }
+                if full || before < 0 || NotEquals(player.m_armSwapperHeadStates[before], state) {
+                    if changes == 0 {
+                        ArmSwapperLog(game, "head check (" + label + "), in vehicle " + BoolToString(VehicleComponent.IsMountedToVehicle(game, player)));
+                    }
+                    changes += 1;
+                    let mark: String = full ? "" : (before < 0 ? " NEW" : " CHANGED, was " + player.m_armSwapperHeadStates[before]);
+                    ArmSwapperLog(game, "  head piece " + name + ": " + state + mark);
+                }
+            }
+        }
+    }
+    let k: Int32 = 0;
+    while k < ArraySize(player.m_armSwapperHeadNames) {
+        if !ArrayContains(names, player.m_armSwapperHeadNames[k]) {
+            if changes == 0 {
+                ArmSwapperLog(game, "head check (" + label + "), in vehicle " + BoolToString(VehicleComponent.IsMountedToVehicle(game, player)));
+            }
+            changes += 1;
+            ArmSwapperLog(game, "  head piece " + player.m_armSwapperHeadNames[k] + " GONE");
+        }
+        k += 1;
+    }
+    if full {
+        ArmSwapperLog(game, "head check (" + label + "): " + IntToString(ArraySize(names)) + " head pieces");
+    }
+    player.m_armSwapperHeadNames = names;
+    player.m_armSwapperHeadStates = states;
+}
+
+@if(!ModuleExists("Codeware"))
+public func ArmSwapperCheckHead(player: ref<PlayerPuppet>, label: String, opt full: Bool) {}
+
+public class ArmSwapperHeadCheckCallback extends DelayCallback {
+    public let player: wref<PlayerPuppet>;
+    public let label: String;
+
+    public func Call() -> Void {
+        ArmSwapperCheckHead(this.player, this.label);
+    }
+}
+
+// From the moment V attaches, checks every few seconds, so a change made by anything (the game, the
+// mod or another mod) shows up in the log at about the time it happened
+@addField(PlayerPuppet)
+public let m_armSwapperHeadWatchRun: Int32;
+
+@addField(PlayerPuppet)
+public let m_armSwapperHeadWatchHand: ItemID;
+
+public class ArmSwapperHeadWatchCallback extends DelayCallback {
+    public let player: wref<PlayerPuppet>;
+    public let run: Int32;
+
+    public func Call() -> Void {
+        let player: ref<PlayerPuppet> = this.player;
+        if !IsDefined(player) || player.m_armSwapperHeadWatchRun != this.run || !(new SimpleArmSwapperSettings()).debugLogging { return; }
+        // A full list whenever what V holds changes (drawn, holstered, swapped)
+        let held: ItemID = ItemID.None();
+        let inHand: ref<ItemObject> = GameInstance.GetTransactionSystem(player.GetGame()).GetItemInSlot(player, t"AttachmentSlots.WeaponRight");
+        if IsDefined(inHand) { held = inHand.GetItemID(); }
+        if !(held == player.m_armSwapperHeadWatchHand) {
+            player.m_armSwapperHeadWatchHand = held;
+            ArmSwapperCheckHead(player, "hand now " + ArmSwapperName(held), true);
+        } else {
+            ArmSwapperCheckHead(player, "watch");
+        }
+        GameInstance.GetDelaySystem(player.GetGame()).DelayCallback(this, 1.0, false);
+    }
+}
+
+public func ArmSwapperStartHeadWatch(player: ref<PlayerPuppet>) {
+    if !(new SimpleArmSwapperSettings()).debugLogging || !IsDefined(player) { return; }
+    player.m_armSwapperHeadWatchRun += 1;
+    ArmSwapperCheckHead(player, "V attached", true);
+    let callback: ref<ArmSwapperHeadWatchCallback> = new ArmSwapperHeadWatchCallback();
+    callback.player = player;
+    callback.run = player.m_armSwapperHeadWatchRun;
+    GameInstance.GetDelaySystem(player.GetGame()).DelayCallback(callback, 1.0, false);
+}
+
+// Checks now and again a moment later, after the game has rebuilt what it rebuilds
+public func ArmSwapperCheckHeadSoon(player: ref<PlayerPuppet>, label: String) {
+    if !(new SimpleArmSwapperSettings()).debugLogging || !IsDefined(player) { return; }
+    ArmSwapperCheckHead(player, label);
+    let delays: array<Float> = [0.5, 2.0, 5.0];
+    for delay in delays {
+        let callback: ref<ArmSwapperHeadCheckCallback> = new ArmSwapperHeadCheckCallback();
+        callback.player = player;
+        callback.label = label + " +" + FloatToStringPrec(delay, 1) + "s";
+        GameInstance.GetDelaySystem(player.GetGame()).DelayCallback(callback, delay, false);
+    }
+}
+
 // Which arm items the item system holds in the arm attachment slots, and which one is active there
 public func ArmSwapperDumpArmSlots(game: GameInstance, player: ref<PlayerPuppet>) {
     if !(new SimpleArmSwapperSettings()).debugLogging || !IsDefined(player) { return; }
@@ -1596,6 +1835,11 @@ public func ArmSwapperPieceLook(comp: ref<IComponent>, out mesh: ResRef, out loo
         return true;
     }
     return false;
+}
+
+// V's skin tone looks are named like "01_ca_pale" or "02_ca_limestone"
+public func ArmSwapperIsSkinLook(look: CName) -> Bool {
+    return StrFindFirst(NameToString(look), "_ca_") == 2;
 }
 
 // Which parts of a piece's mesh show (its chunk mask)
@@ -1732,6 +1976,14 @@ public func ArmSwapperStylePiecesOf(player: ref<PlayerPuppet>, owner: ref<Entity
                             }
                         } else {
                             let wantLook: CName = piece.keepSkin ? look : piece.app;
+                            // The game puts V's skin tone on some plain arm pieces that the style data
+                            // lists with the "default" look (the left upper arm of the Mantis Blades).
+                            // Switching those to "default" on every draw made the left arm flicker:
+                            // keep V's skin on a plain arm mesh that stays the same
+                            if !piece.keepSkin && Equals(piece.app, n"default") && Equals(mesh, piece.mesh)
+                                && ArmSwapperIsSkinLook(look) && StrContains(ResRef.ToString(mesh), "\\entities\\meshes\\") {
+                                wantLook = look;
+                            }
                             // The game's own masks may set the top bit where the data does not;
                             // that bit makes no difference, so it is not a change
                             let maskChanged: Bool = NotEquals(mask | 9223372036854775808ul, piece.mask | 9223372036854775808ul);
@@ -1771,6 +2023,7 @@ public func ArmSwapperStylePiecesOf(player: ref<PlayerPuppet>, owner: ref<Entity
         }
         // Painted-nail styles replace V's own nails; switch those off, and back on without one
         ArmSwapperOwnNails(player, comps, armsType, index);
+        ArmSwapperCheckHead(player, "after styling, " + reason);
     }
     return changed;
 }
@@ -1854,6 +2107,7 @@ public func ArmSwapperTidyWorn(player: ref<PlayerPuppet>, armsType: Int32, holst
     if armsType >= 1 && armsType <= 3 {
         ArmSwapperOwnNails(player, comps, armsType, index);
     }
+    ArmSwapperCheckHead(player, "after tidying worn arms");
 }
 
 @if(!ModuleExists("Codeware"))
@@ -1964,6 +2218,7 @@ public func ArmSwapperRestyleWorn(player: ref<PlayerPuppet>, why: String) {
     let arms: ItemID = eqData.GetActiveMeleeWare();
     if ArmSwapperArmsType(arms) < 1 { return; }
     ArmSwapperLog(player.GetGame(), "restyling worn arms (" + why + ") for " + ArmSwapperName(arms));
+    ArmSwapperCheckHeadSoon(player, why);
     let ts: ref<TransactionSystem> = GameInstance.GetTransactionSystem(player.GetGame());
     let inHand: ref<ItemObject> = ts.GetItemInSlot(player, t"AttachmentSlots.WeaponRight");
     if IsDefined(inHand) && inHand.GetItemID() == arms {

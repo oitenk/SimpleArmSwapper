@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.4.1
+
+Possible fix for V's hair and beard showing in first person view with a weapon drawn. With Glamdoc Style Per Arm Type on, the mod switched off the MaxTac look of MaxTac-based Mantis Blades while a save was still loading, which could leave V's hair showing. It now waits a few seconds after a save loads. If you draw those blades in the first seconds after loading, they may show their MaxTac look briefly before your style returns. Every setup is different, so if you still see hair or a beard in first person, please let me know.
+
+Fixed a light flicker on the left arm of styled Mantis Blades when drawing them. V's skin tone now stays on the left upper arm.
+
+Debug Logging now also records V's head, hair and beard pieces, to help track down visual problems like this one.
+
 ## 2.4
 
 Glamdoc styles now show on every melee arm you have equipped, not only on the arms in the first arm slot. Mantis Blades and Monowire in any slot wear their own style and colours in hand, put away, in photo mode, on the inventory screen and in the Glamdoc preview, for both body types. This part needs Codeware. Without it, arms outside the first slot show their plain look, as before.
