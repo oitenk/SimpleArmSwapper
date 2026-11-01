@@ -10,6 +10,10 @@ Fixed the Barghest Glamdoc style on the Monowire when it sits in a later arm slo
 
 Arm pieces that a style leaves out now come back when you switch to a style that uses them.
 
+Fixed some styled arm pieces showing grey instead of V's skin tone (most visible on Kang Tao Mantis Blades put away). They now wear V's own skin tone, as the game shows them, for every skin tone.
+
+Known base game issue: Kang Tao Mantis Blades show their colours when drawn but not when put away. This happens without Simple Arm Swapper too.
+
 ## 2.4.1
 
 Possible fix for V's hair and beard showing in first person view with a weapon drawn. With Glamdoc Style Per Arm Type on, the mod switched off the MaxTac look of MaxTac-based Mantis Blades while a save was still loading, which could leave V's hair showing. It now waits a few seconds after a save loads. If you draw those blades in the first seconds after loading, they may show their MaxTac look briefly before your style returns. Every setup is different, so if you still see hair or a beard in first person, please let me know.

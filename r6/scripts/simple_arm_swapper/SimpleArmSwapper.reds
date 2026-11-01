@@ -1971,6 +1971,20 @@ public func ArmSwapperStylePiecesOf(player: ref<PlayerPuppet>, owner: ref<Entity
     let armsSuffix: String = isOut ? "arms" : (isPreview ? "htpp" : NameToString(view));
     let armsKey: CName = StringToName(prefix + armsSuffix);
     let elementKey: CName = useElement ? StringToName(prefix + NameToString(element)) : n"None";
+    // V's skin tone, from a plain (unstyled) arm piece that wears it
+    let skinTone: CName = n"None";
+    for comp in comps {
+        if IsDefined(comp) && Equals(skinTone, n"None") && StrBeginsWith(NameToString(comp.GetName()), "a0_00") {
+            let toneMesh: ResRef;
+            let toneLook: CName;
+            if ArmSwapperPieceLook(comp, toneMesh, toneLook) && ArmSwapperIsSkinLook(toneLook) {
+                let tonePath: String = ResRef.ToString(toneMesh);
+                if !StrContains(tonePath, "\\pimp_chrome\\") {
+                    skinTone = toneLook;
+                }
+            }
+        }
+    }
     let changed: Int32 = 0;
     let found: Int32 = 0;
     for piece in memory.ArmSwapperStylePieces() {
@@ -2013,17 +2027,27 @@ public func ArmSwapperStylePiecesOf(player: ref<PlayerPuppet>, owner: ref<Entity
                                 ArmSwapperLog(game, "  piece " + NameToString(piece.comp) + " hidden");
                             }
                         } else {
-                            let wantLook: CName = piece.keepSkin ? look : piece.app;
-                            // Barghest meshes name the palest skin tone "default"
-                            if piece.keepSkin && Equals(look, n"01_ca_pale") && StrContains(ResRef.ToString(piece.mesh), "\\pimp_chrome\\barghest\\") {
-                                wantLook = n"default";
+                            // Pieces that wear V's skin tone take it from V's plain arm pieces (a style
+                            // mesh may show an uncoloured "default" look at this point)
+                            let wantLook: CName = piece.app;
+                            if piece.keepSkin {
+                                wantLook = NotEquals(skinTone, n"None") ? skinTone : look;
+                                // Style meshes often name the palest skin tone "default"
+                                if Equals(wantLook, n"01_ca_pale") && Equals(piece.app, n"default") {
+                                    wantLook = n"default";
+                                }
                             }
                             // The game puts V's skin tone on some plain arm pieces that the style data
                             // lists with the "default" look (the left upper arm of the Mantis Blades).
                             // Switching those to "default" on every draw made the left arm flicker:
-                            // keep V's skin on a plain arm mesh that stays the same
+                            // keep V's skin on a plain arm mesh that stays the same. Only plain meshes: a
+                            // style's mesh (in a pimp_chrome folder) with a skin look draws like a plain
+                            // arm, which left holstered MaxTac-based blades unstyled after the MaxTac look
+                            // was switched off.
+                            let meshText: String = ResRef.ToString(mesh);
                             if !piece.keepSkin && Equals(piece.app, n"default") && Equals(mesh, piece.mesh)
-                                && ArmSwapperIsSkinLook(look) && StrContains(ResRef.ToString(mesh), "\\entities\\meshes\\") {
+                                && ArmSwapperIsSkinLook(look) && StrContains(meshText, "\\entities\\meshes\\")
+                                && !StrContains(meshText, "\\pimp_chrome\\") {
                                 wantLook = look;
                             }
                             // The game's own masks may set the top bit where the data does not;
