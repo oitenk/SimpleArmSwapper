@@ -7,7 +7,7 @@ module SimpleArmSwapperMod
 @if(ModuleExists("Codeware.Localization"))
 import Codeware.Localization.*
 
-public func Version() -> String = "2.4.2"
+public func Version() -> String = "2.4.3"
 
 // Options shown in the Mod Settings menu. Mod Settings is optional: when it is installed it
 // writes the saved choice into this class's default values (at startup and whenever the
@@ -2352,21 +2352,43 @@ public func ArmSwapperTidyWornSoon(player: ref<PlayerPuppet>, armsType: Int32, h
     }
 }
 
-// Shows the holstered pieces hidden while the blades were out, as they were
+// Shows the holstered pieces hidden while the blades were out, as they were. When the game has put
+// a fresh copy of a piece on V meanwhile (a style change, the MaxTac look switching), the old copy
+// stays hidden: showing it too stacked copies of the same hand in different styles, more with
+// every draw.
 @if(ModuleExists("Codeware"))
 public func ArmSwapperShowHiddenHolstered(player: ref<PlayerPuppet>) {
     let memory: ref<SimpleArmSwapperStyleMemory> = SimpleArmSwapperStyleMemory.Get(player.GetGame());
     if !IsDefined(memory) || ArraySize(memory.hiddenHolstered) == 0 { return; }
+    // Names of holstered pieces the game shows now, other than the ones this mod hid
+    let freshNames: array<CName>;
+    for comp in player.GetComponents() {
+        let mask: Uint64;
+        if IsDefined(comp) && ArmSwapperPieceMask(comp, mask) && NotEquals(mask, 0ul) {
+            let mine: Bool = false;
+            for hidden in memory.hiddenHolstered {
+                if hidden == comp { mine = true; }
+            }
+            if !mine && !ArrayContains(freshNames, comp.GetName()) { ArrayPush(freshNames, comp.GetName()); }
+        }
+    }
+    let shown: Int32 = 0;
+    let kept: Int32 = 0;
     let i: Int32 = 0;
     while i < ArraySize(memory.hiddenHolstered) {
         let comp: ref<IComponent> = memory.hiddenHolstered[i];
         if IsDefined(comp) && i < ArraySize(memory.hiddenMasks) {
-            ArmSwapperSetPieceMask(comp, memory.hiddenMasks[i]);
-            comp.RefreshAppearance();
+            if ArrayContains(freshNames, comp.GetName()) {
+                kept += 1;
+            } else {
+                ArmSwapperSetPieceMask(comp, memory.hiddenMasks[i]);
+                comp.RefreshAppearance();
+                shown += 1;
+            }
         }
         i += 1;
     }
-    ArmSwapperLog(player.GetGame(), "  " + IntToString(ArraySize(memory.hiddenHolstered)) + " holstered pieces shown again");
+    ArmSwapperLog(player.GetGame(), "  " + IntToString(shown) + " holstered pieces shown again, " + IntToString(kept) + " old copies left hidden");
     ArrayClear(memory.hiddenHolstered);
     ArrayClear(memory.hiddenMasks);
 }

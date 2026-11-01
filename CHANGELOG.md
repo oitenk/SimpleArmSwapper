@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.3
+
+Fixed holstered Mantis Blade hands showing several styles on top of each other, as patches of different colours. Old copies of the hands kept coming back each time the blades were drawn and put away, more so after changing styles. A save reload cleared it; now it no longer builds up.
+
 ## 2.4.2
 
 Fixed the Barghest Glamdoc style on Mantis Blades. On MaxTac-based Mantis Blades the mod replaced the Barghest look with the plain Mantis Blades, leaving bare arms, plain blades or a single styled hand, and in a later arm slot Mantis Blades showed their plain look. They now wear the Barghest look in any slot, in hand and put away, for both body types.
