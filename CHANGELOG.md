@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.4.2
+
+Fixed the Barghest Glamdoc style on MaxTac-based Mantis Blades. The mod replaced the Barghest look with the plain Mantis Blades, leaving bare arms, plain blades or a single styled hand. The Barghest look now stays, in hand and put away.
+
+Fixed the Barghest Glamdoc style on the Monowire when it sits in a later arm slot. It showed the plain Monowire; it now wears the Barghest look in hand, put away and in third person, for both body types.
+
 ## 2.4.1
 
 Possible fix for V's hair and beard showing in first person view with a weapon drawn. With Glamdoc Style Per Arm Type on, the mod switched off the MaxTac look of MaxTac-based Mantis Blades while a save was still loading, which could leave V's hair showing. It now waits a few seconds after a save loads. If you draw those blades in the first seconds after loading, they may show their MaxTac look briefly before your style returns. Every setup is different, so if you still see hair or a beard in first person, please let me know.

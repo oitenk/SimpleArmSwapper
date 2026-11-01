@@ -7,7 +7,7 @@ module SimpleArmSwapperMod
 @if(ModuleExists("Codeware.Localization"))
 import Codeware.Localization.*
 
-public func Version() -> String = "2.4.1"
+public func Version() -> String = "2.4.2"
 
 // Options shown in the Mod Settings menu. Mod Settings is optional: when it is installed it
 // writes the saved choice into this class's default values (at startup and whenever the
@@ -781,6 +781,7 @@ public class SimpleArmSwapperStyleMemory extends ScriptableSystem {
     public func ArmSwapperStylePieces() -> array<ref<ArmSwapperStylePiece>> {
         if ArraySize(this.m_stylePieces) == 0 {
             ArmSwapperBuildStylePieces(this.m_stylePieces);
+            ArmSwapperAddBarghestPieces(this.m_stylePieces);
             ArmSwapperBuildElementHints(this.m_elementHints);
         }
         return this.m_stylePieces;
@@ -1964,6 +1965,13 @@ public func ArmSwapperStylePiecesOf(player: ref<PlayerPuppet>, owner: ref<Entity
                         let thirdPerson: Bool = StrContains(meshPath, "_tpp") || StrContains(meshPath, "photomode") || StrContains(meshPath, "photo_mode");
                         pieceShown = onlyTpp ? thirdPerson : !thirdPerson;
                     }
+                    // The Barghest Mantis Blades (10, long sleeves 19) have only plain pieces in the
+                    // style data; the game adds its Barghest meshes another way. Keep those.
+                    if pieceShown && ArmSwapperIsBarghestStyle(armsType, index)
+                        && StrContains(ResRef.ToString(mesh), "\\pimp_chrome\\barghest\\")
+                        && !StrContains(ResRef.ToString(piece.mesh), "\\pimp_chrome\\barghest\\") {
+                        pieceShown = false;
+                    }
                     if pieceShown {
                         found += 1;
                         if piece.hide {
@@ -1976,6 +1984,10 @@ public func ArmSwapperStylePiecesOf(player: ref<PlayerPuppet>, owner: ref<Entity
                             }
                         } else {
                             let wantLook: CName = piece.keepSkin ? look : piece.app;
+                            // Barghest meshes name the palest skin tone "default"
+                            if piece.keepSkin && Equals(look, n"01_ca_pale") && StrContains(ResRef.ToString(piece.mesh), "\\pimp_chrome\\barghest\\") {
+                                wantLook = n"default";
+                            }
                             // The game puts V's skin tone on some plain arm pieces that the style data
                             // lists with the "default" look (the left upper arm of the Mantis Blades).
                             // Switching those to "default" on every draw made the left arm flicker:
@@ -2049,6 +2061,49 @@ public func ArmSwapperHideHolsteredWhileOut(player: ref<PlayerPuppet>, comps: ar
 
 @if(!ModuleExists("Codeware"))
 public func ArmSwapperHideHolsteredWhileOut(player: ref<PlayerPuppet>, comps: array<ref<IComponent>>) {}
+
+// The Barghest Monowire (style 7). The game's style data lists only the plain pieces for it: the
+// game adds the Barghest look through separate Phantom Liberty parts, and only on arms it styles
+// itself. These rows are taken from those parts (a0_002_?a__monowire_whip_barghest.ent,
+// a0_002_?a__monowire_whip_holstered_barghest.ent, a0_002_wa__monowire_whip_tpp_barghest.ent) and
+// replace the plain rows. Every piece wears V's skin tone. Not produced by the style data generator.
+public func ArmSwapperAddBarghestPieces(out pieces: array<ref<ArmSwapperStylePiece>>) {
+    let replaced: array<CName> = [n"f_monowire_7_arms", n"f_monowire_7_hfpp", n"f_monowire_7_htpp",
+        n"m_monowire_7_arms", n"m_monowire_7_hfpp", n"m_monowire_7_htpp"];
+    let kept: array<ref<ArmSwapperStylePiece>>;
+    for p in pieces {
+        if !ArrayContains(replaced, p.key) || Equals(p.comp, n"a0_001__personal_link_tpp4537") {
+            ArrayPush(kept, p);
+        }
+    }
+    pieces = kept;
+    let all: Uint64 = 9223372036854775807ul;
+    let leftHolstered: Uint64 = 18446744073709550079ul;
+    // female V: arms out, holstered first person, holstered third person
+    ArrayPush(pieces, ArmSwapperStylePieceNew(n"f_monowire_7_arms", n"a0_002_wa__monowire_whip_l_cableless", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_wa__monowire_whip_l_barghest.mesh", n"default", true, all, false));
+    ArrayPush(pieces, ArmSwapperStylePieceNew(n"f_monowire_7_arms", n"a0_002_wa__monowire_whip_r_cableless", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_wa__monowire_whip_r_barghest.mesh", n"default", true, all, false));
+    ArrayPush(pieces, ArmSwapperStylePieceNew(n"f_monowire_7_hfpp", n"a0_002_wa__monowire_whip_l_cableless", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_wa__monowire_whip_l_cableless_barghest.mesh", n"default", true, leftHolstered, false));
+    ArrayPush(pieces, ArmSwapperStylePieceNew(n"f_monowire_7_hfpp", n"a0_002_wa__monowire_whip_r_cableless", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_wa__monowire_whip_r_barghest.mesh", n"default", true, all, false));
+    ArrayPush(pieces, ArmSwapperStylePieceNew(n"f_monowire_7_hfpp", n"a0_002_wa__monowire_whip_l_cableless5083", r"base\\characters\\cyberware\\player\\a0_002__monowire_whip\\a0_002_wa__monowire_whip_l_cableless.mesh", n"default", false, 0ul, true));
+    ArrayPush(pieces, ArmSwapperStylePieceNew(n"f_monowire_7_htpp", n"a0_002_wa__monowire_whip_l_cableless", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_wa__monowire_whip_l_tpp_barghest.mesh", n"default", true, all, false));
+    ArrayPush(pieces, ArmSwapperStylePieceNew(n"f_monowire_7_htpp", n"a0_002_wa__monowire_whip_r_cableless", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_wa__monowire_whip_r_tpp_barghest.mesh", n"default", true, all, false));
+    // male V (third person uses the holstered first person meshes, as the game does)
+    ArrayPush(pieces, ArmSwapperStylePieceNew(n"m_monowire_7_arms", n"a0_002_ma__monowire_whip_l", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_ma__monowire_whip_l_barghest.mesh", n"default", true, all, false));
+    ArrayPush(pieces, ArmSwapperStylePieceNew(n"m_monowire_7_arms", n"a0_002_ma__monowire_whip_r", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_ma__monowire_whip_r_barghest.mesh", n"default", true, all, false));
+    ArrayPush(pieces, ArmSwapperStylePieceNew(n"m_monowire_7_hfpp", n"a0_002_wa__monowire_whip_l_cableless", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_ma__monowire_whip_l_cableless_barghest.mesh", n"default", true, leftHolstered, false));
+    ArrayPush(pieces, ArmSwapperStylePieceNew(n"m_monowire_7_hfpp", n"a0_002_wa__monowire_whip_l_cableless4788", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_ma__monowire_whip_l_cableless_barghest.mesh", n"default", true, 18446744073709551104ul, false));
+    ArrayPush(pieces, ArmSwapperStylePieceNew(n"m_monowire_7_hfpp", n"a0_002_wa__monowire_whip_r_cableless", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_ma__monowire_whip_r_barghest.mesh", n"default", true, all, false));
+    ArrayPush(pieces, ArmSwapperStylePieceNew(n"m_monowire_7_htpp", n"a0_002_wa__monowire_whip_l_cableless", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_ma__monowire_whip_l_cableless_barghest.mesh", n"default", true, leftHolstered, false));
+    ArrayPush(pieces, ArmSwapperStylePieceNew(n"m_monowire_7_htpp", n"a0_002_wa__monowire_whip_l_cableless4788", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_ma__monowire_whip_l_cableless_barghest.mesh", n"default", true, 18446744073709551104ul, false));
+    ArrayPush(pieces, ArmSwapperStylePieceNew(n"m_monowire_7_htpp", n"a0_002_wa__monowire_whip_r_cableless", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_ma__monowire_whip_r_barghest.mesh", n"default", true, all, false));
+}
+
+// The Barghest style of each arm type (Mantis Blades also have a long-sleeve version)
+public func ArmSwapperIsBarghestStyle(armsType: Int32, index: Int32) -> Bool {
+    if armsType == 1 { return index == 10 || index == 19; }
+    if armsType == 2 { return index == 7; }
+    return false;
+}
 
 // Styles that keep V's own nails: the plain style, two Mantis Blade styles and one Monowire style
 public func ArmSwapperStyleKeepsOwnNails(armsType: Int32, index: Int32) -> Bool {
