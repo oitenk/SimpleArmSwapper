@@ -2,9 +2,13 @@
 
 ## 2.4.2
 
-Fixed the Barghest Glamdoc style on MaxTac-based Mantis Blades. The mod replaced the Barghest look with the plain Mantis Blades, leaving bare arms, plain blades or a single styled hand. The Barghest look now stays, in hand and put away.
+Fixed the Barghest Glamdoc style on Mantis Blades. On MaxTac-based Mantis Blades the mod replaced the Barghest look with the plain Mantis Blades, leaving bare arms, plain blades or a single styled hand, and in a later arm slot Mantis Blades showed their plain look. They now wear the Barghest look in any slot, in hand and put away, for both body types.
+
+V's nail colour no longer shows on the chrome hands of the Barghest Mantis Blades.
 
 Fixed the Barghest Glamdoc style on the Monowire when it sits in a later arm slot. It showed the plain Monowire; it now wears the Barghest look in hand, put away and in third person, for both body types.
+
+Arm pieces that a style leaves out now come back when you switch to a style that uses them.
 
 ## 2.4.1
 

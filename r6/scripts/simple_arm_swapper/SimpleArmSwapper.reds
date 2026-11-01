@@ -777,6 +777,29 @@ public class SimpleArmSwapperStyleMemory extends ScriptableSystem {
     public let hiddenMasks: array<Uint64>;
     // V's own nail pieces switched off under a painted-nail style
     public let hiddenNails: array<wref<IComponent>>;
+    // Mantis Blade nail pieces switched off under the Barghest style
+    public let hiddenBladeNails: array<wref<IComponent>>;
+    // Arm pieces hidden because a style leaves them out; they may show again for another style
+    private let m_hidForStyle: array<wref<IComponent>>;
+
+    public func ArmSwapperRememberHidForStyle(comp: ref<IComponent>) {
+        if !this.ArmSwapperHidForStyle(comp) { ArrayPush(this.m_hidForStyle, comp); }
+    }
+
+    public func ArmSwapperHidForStyle(comp: ref<IComponent>) -> Bool {
+        for c in this.m_hidForStyle {
+            if c == comp { return true; }
+        }
+        return false;
+    }
+
+    public func ArmSwapperForgetHidForStyle(comp: ref<IComponent>) {
+        let kept: array<wref<IComponent>>;
+        for c in this.m_hidForStyle {
+            if IsDefined(c) && c != comp { ArrayPush(kept, c); }
+        }
+        this.m_hidForStyle = kept;
+    }
 
     public func ArmSwapperStylePieces() -> array<ref<ArmSwapperStylePiece>> {
         if ArraySize(this.m_stylePieces) == 0 {
@@ -1959,10 +1982,16 @@ public func ArmSwapperStylePiecesOf(player: ref<PlayerPuppet>, owner: ref<Entity
                     let mask: Uint64;
                     // A piece the game hid completely is a spare copy (V can carry several pieces of
                     // the same name, of which the game shows one) or not meant to show: leave it be
-                    let pieceShown: Bool = ArmSwapperPieceLook(comp, mesh, look) && ArmSwapperPieceMask(comp, mask) && NotEquals(mask, 0ul);
+                    // The exception is a piece this mod hid for an earlier style: it shows again
+                    // when a style wants it.
+                    let pieceShown: Bool = ArmSwapperPieceLook(comp, mesh, look) && ArmSwapperPieceMask(comp, mask)
+                        && (NotEquals(mask, 0ul) || (!piece.hide && memory.ArmSwapperHidForStyle(comp)));
                     if pieceShown && (onlyFpp || onlyTpp) {
+                        // Barghest puts holstered meshes on the third person photo mode pieces, so
+                        // the piece name counts too
                         let meshPath: String = ResRef.ToString(mesh);
-                        let thirdPerson: Bool = StrContains(meshPath, "_tpp") || StrContains(meshPath, "photomode") || StrContains(meshPath, "photo_mode");
+                        let thirdPerson: Bool = StrContains(meshPath, "_tpp") || StrContains(meshPath, "photomode") || StrContains(meshPath, "photo_mode")
+                            || StrContains(NameToString(comp.GetName()), "photomode");
                         pieceShown = onlyTpp ? thirdPerson : !thirdPerson;
                     }
                     // The Barghest Mantis Blades (10, long sleeves 19) have only plain pieces in the
@@ -1979,6 +2008,7 @@ public func ArmSwapperStylePiecesOf(player: ref<PlayerPuppet>, owner: ref<Entity
                             if NotEquals(mask, 0ul) {
                                 ArmSwapperSetPieceMask(comp, 0ul);
                                 comp.RefreshAppearance();
+                                memory.ArmSwapperRememberHidForStyle(comp);
                                 changed += 1;
                                 ArmSwapperLog(game, "  piece " + NameToString(piece.comp) + " hidden");
                             }
@@ -2001,6 +2031,7 @@ public func ArmSwapperStylePiecesOf(player: ref<PlayerPuppet>, owner: ref<Entity
                             let maskChanged: Bool = NotEquals(mask | 9223372036854775808ul, piece.mask | 9223372036854775808ul);
                             if maskChanged {
                                 ArmSwapperSetPieceMask(comp, piece.mask);
+                                if Equals(mask, 0ul) { memory.ArmSwapperForgetHidForStyle(comp); }
                                 changed += 1;
                                 ArmSwapperLog(game, "  piece " + NameToString(piece.comp) + " chunk mask " + s"\(mask) -> \(piece.mask)");
                             }
@@ -2062,40 +2093,120 @@ public func ArmSwapperHideHolsteredWhileOut(player: ref<PlayerPuppet>, comps: ar
 @if(!ModuleExists("Codeware"))
 public func ArmSwapperHideHolsteredWhileOut(player: ref<PlayerPuppet>, comps: array<ref<IComponent>>) {}
 
-// The Barghest Monowire (style 7). The game's style data lists only the plain pieces for it: the
-// game adds the Barghest look through separate Phantom Liberty parts, and only on arms it styles
-// itself. These rows are taken from those parts (a0_002_?a__monowire_whip_barghest.ent,
-// a0_002_?a__monowire_whip_holstered_barghest.ent, a0_002_wa__monowire_whip_tpp_barghest.ent) and
-// replace the plain rows. Every piece wears V's skin tone. Not produced by the style data generator.
+// Barghest styles: Mantis Blades 10 (19 with long sleeves) and Monowire 7. The game's style data
+// lists only the plain pieces for them: the game adds the Barghest look through separate Phantom
+// Liberty parts, and only on arms it styles itself. These rows are taken from those parts
+// (ep1\characters\cyberware\player\a0_003__mantisblade\pimp_chrome\barghest\ and
+// ...\a0_002__monowire\pimp_chrome\barghest\) and replace the matching plain rows. They are not
+// produced by the style data generator.
 public func ArmSwapperAddBarghestPieces(out pieces: array<ref<ArmSwapperStylePiece>>) {
-    let replaced: array<CName> = [n"f_monowire_7_arms", n"f_monowire_7_hfpp", n"f_monowire_7_htpp",
+    let news: array<ref<ArmSwapperStylePiece>>;
+    let all: Uint64 = 9223372036854775807ul;
+
+    // Monowire: every piece wears V's skin tone
+    let wireLeftHolstered: Uint64 = 18446744073709550079ul;
+    ArrayPush(news, ArmSwapperStylePieceNew(n"f_monowire_7_arms", n"a0_002_wa__monowire_whip_l_cableless", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_wa__monowire_whip_l_barghest.mesh", n"default", true, all, false));
+    ArrayPush(news, ArmSwapperStylePieceNew(n"f_monowire_7_arms", n"a0_002_wa__monowire_whip_r_cableless", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_wa__monowire_whip_r_barghest.mesh", n"default", true, all, false));
+    ArrayPush(news, ArmSwapperStylePieceNew(n"f_monowire_7_hfpp", n"a0_002_wa__monowire_whip_l_cableless", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_wa__monowire_whip_l_cableless_barghest.mesh", n"default", true, wireLeftHolstered, false));
+    ArrayPush(news, ArmSwapperStylePieceNew(n"f_monowire_7_hfpp", n"a0_002_wa__monowire_whip_r_cableless", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_wa__monowire_whip_r_barghest.mesh", n"default", true, all, false));
+    ArrayPush(news, ArmSwapperStylePieceNew(n"f_monowire_7_hfpp", n"a0_002_wa__monowire_whip_l_cableless5083", r"base\\characters\\cyberware\\player\\a0_002__monowire_whip\\a0_002_wa__monowire_whip_l_cableless.mesh", n"default", false, 0ul, true));
+    ArrayPush(news, ArmSwapperStylePieceNew(n"f_monowire_7_htpp", n"a0_002_wa__monowire_whip_l_cableless", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_wa__monowire_whip_l_tpp_barghest.mesh", n"default", true, all, false));
+    ArrayPush(news, ArmSwapperStylePieceNew(n"f_monowire_7_htpp", n"a0_002_wa__monowire_whip_r_cableless", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_wa__monowire_whip_r_tpp_barghest.mesh", n"default", true, all, false));
+    // male V's third person uses the holstered first person meshes, as the game does
+    ArrayPush(news, ArmSwapperStylePieceNew(n"m_monowire_7_arms", n"a0_002_ma__monowire_whip_l", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_ma__monowire_whip_l_barghest.mesh", n"default", true, all, false));
+    ArrayPush(news, ArmSwapperStylePieceNew(n"m_monowire_7_arms", n"a0_002_ma__monowire_whip_r", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_ma__monowire_whip_r_barghest.mesh", n"default", true, all, false));
+    for view in [n"m_monowire_7_hfpp", n"m_monowire_7_htpp"] {
+        ArrayPush(news, ArmSwapperStylePieceNew(view, n"a0_002_wa__monowire_whip_l_cableless", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_ma__monowire_whip_l_cableless_barghest.mesh", n"default", true, wireLeftHolstered, false));
+        ArrayPush(news, ArmSwapperStylePieceNew(view, n"a0_002_wa__monowire_whip_l_cableless4788", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_ma__monowire_whip_l_cableless_barghest.mesh", n"default", true, 18446744073709551104ul, false));
+        ArrayPush(news, ArmSwapperStylePieceNew(view, n"a0_002_wa__monowire_whip_r_cableless", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_ma__monowire_whip_r_barghest.mesh", n"default", true, all, false));
+    }
+
+    // Mantis Blades: chrome forearms and blades with their own looks; drawn, the plain upper arms
+    // stay. Put away, the upper arms are hidden, and with long sleeves (19) the hands are trimmed.
+    let blades: array<ref<ArmSwapperStylePiece>>;
+    ArrayPush(blades, ArmSwapperStylePieceNew(n"None", n"a0_003_wa__mantisblade_left_blade", r"ep1\\characters\\cyberware\\player\\a0_003__mantisblade\\pimp_chrome\\barghest\\entities\\meshes\\a0_003_wa__mantisblade_left_blade_barghest.mesh", n"default", false, all, false));
+    ArrayPush(blades, ArmSwapperStylePieceNew(n"None", n"a0_003_wa__mantisblade_right_blade", r"ep1\\characters\\cyberware\\player\\a0_003__mantisblade\\pimp_chrome\\barghest\\entities\\meshes\\a0_003_wa__mantisblade_right_blade_barghest.mesh", n"default", false, all, false));
+    let mechanisms: array<ref<ArmSwapperStylePiece>>;
+    ArrayPush(mechanisms, ArmSwapperStylePieceNew(n"None", n"a0_003_wa__mantisblade_left_mechanisms", r"ep1\\characters\\cyberware\\player\\a0_003__mantisblade\\pimp_chrome\\barghest\\entities\\meshes\\a0_003_wa__mantisblade_left_mechanisms_barghest.mesh", n"default", false, all, false));
+    ArrayPush(mechanisms, ArmSwapperStylePieceNew(n"None", n"a0_003_wa__mantisblade_left_mechanisms6263", r"ep1\\characters\\cyberware\\player\\a0_003__mantisblade\\pimp_chrome\\barghest\\entities\\meshes\\a0_003_wa__mantisblade_left_mechanisms_barghest.mesh", n"default", false, all, false));
+    ArrayPush(mechanisms, ArmSwapperStylePieceNew(n"None", n"a0_003_wa__mantisblade_right_mechanisms", r"ep1\\characters\\cyberware\\player\\a0_003__mantisblade\\pimp_chrome\\barghest\\entities\\meshes\\a0_003_wa__mantisblade_right_mechanisms_barghest.mesh", n"default", false, all, false));
+    ArrayPush(mechanisms, ArmSwapperStylePieceNew(n"None", n"a0_003_wa__mantisblade_right_mechanisms2035", r"ep1\\characters\\cyberware\\player\\a0_003__mantisblade\\pimp_chrome\\barghest\\entities\\meshes\\a0_003_wa__mantisblade_right_mechanisms_barghest.mesh", n"default", false, all, false));
+    let elements: array<String> = ["base", "chemical", "thermal", "electric"];
+    let bladeLooks: array<CName> = [n"default", n"toxic", n"thermal", n"electric"];
+    let wLeft: ResRef = r"ep1\\characters\\cyberware\\player\\a0_003__mantisblade\\pimp_chrome\\barghest\\entities\\meshes\\a0_003_wa__mantisblade_left_barghest.mesh";
+    let wRight: ResRef = r"ep1\\characters\\cyberware\\player\\a0_003__mantisblade\\pimp_chrome\\barghest\\entities\\meshes\\a0_003_wa__mantisblade_right_barghest.mesh";
+    let mLeft: ResRef = r"ep1\\characters\\cyberware\\player\\a0_003__mantisblade\\pimp_chrome\\barghest\\entities\\meshes\\a0_003_ma__mantisblade_left_barghest.mesh";
+    let mRight: ResRef = r"ep1\\characters\\cyberware\\player\\a0_003__mantisblade\\pimp_chrome\\barghest\\entities\\meshes\\a0_003_ma__mantisblade_right_barghest.mesh";
+    let wLeftHolstered: ResRef = r"ep1\\characters\\cyberware\\player\\a0_003__mantisblade\\pimp_chrome\\barghest\\entities\\meshes\\a0_003_wa__mantisblade_holstered_left_barghest.mesh";
+    let wRightHolstered: ResRef = r"ep1\\characters\\cyberware\\player\\a0_003__mantisblade\\pimp_chrome\\barghest\\entities\\meshes\\a0_003_wa__mantisblade_holstered_right_barghest.mesh";
+    let mLeftHolstered: ResRef = r"ep1\\characters\\cyberware\\player\\a0_003__mantisblade\\pimp_chrome\\barghest\\entities\\meshes\\a0_003_ma__mantisblade_holstered_left_barghest.mesh";
+    let mRightHolstered: ResRef = r"ep1\\characters\\cyberware\\player\\a0_003__mantisblade\\pimp_chrome\\barghest\\entities\\meshes\\a0_003_ma__mantisblade_holstered_right_barghest.mesh";
+    let wUpperLeft: ResRef = r"base\\characters\\cyberware\\player\\a0_003__mantisblade\\entities\\meshes\\a0_003_wa__mantisblade_holstered_upperarm_left.mesh";
+    let wUpperRight: ResRef = r"base\\characters\\cyberware\\player\\a0_003__mantisblade\\entities\\meshes\\a0_003_wa__mantisblade_holstered_upperarm_right.mesh";
+    let mUpperLeft: ResRef = r"base\\characters\\cyberware\\player\\a0_003__mantisblade\\entities\\meshes\\a0_003_ma__mantisblade_holstered_upperarm_left.mesh";
+    let mUpperRight: ResRef = r"base\\characters\\cyberware\\player\\a0_003__mantisblade\\entities\\meshes\\a0_003_ma__mantisblade_holstered_upperarm_right.mesh";
+    for index in [10, 19] {
+        let longSleeves: Bool = index == 19;
+        let f: String = "f_mantis_" + IntToString(index) + "_";
+        let m: String = "m_mantis_" + IntToString(index) + "_";
+        // drawn
+        ArrayPush(news, ArmSwapperStylePieceNew(StringToName(f + "arms"), n"a0_003_wa__mantisblade_left", wLeft, n"default", false, all, false));
+        ArrayPush(news, ArmSwapperStylePieceNew(StringToName(f + "arms"), n"a0_003_wa__mantisblade_right", wRight, n"default", false, all, false));
+        ArrayPush(news, ArmSwapperStylePieceNew(StringToName(m + "arms"), n"a0_003_ma__mantisblade_left", mLeft, n"default", false, all, false));
+        ArrayPush(news, ArmSwapperStylePieceNew(StringToName(m + "arms"), n"a0_003_ma__mantisblade_right", mRight, n"default", false, all, false));
+        let e: Int32 = 0;
+        while e < ArraySize(elements) {
+            for g in [f, m] {
+                let key: CName = StringToName(g + elements[e]);
+                for b in blades {
+                    ArrayPush(news, ArmSwapperStylePieceNew(key, b.comp, b.mesh, bladeLooks[e], false, all, false));
+                }
+                for mech in mechanisms {
+                    ArrayPush(news, ArmSwapperStylePieceNew(key, mech.comp, mech.mesh, n"default", false, all, false));
+                }
+            }
+            e += 1;
+        }
+        // put away: female V first person, female V third person (photo mode pieces), male V both.
+        // In third person the upper arms keep their plain rows: they are V's only upper arms there.
+        let fLeftMask: Uint64 = longSleeves ? 18446744073709551599ul : all;
+        let fRightMask: Uint64 = longSleeves ? 18446744073709551607ul : all;
+        let mLeftMask: Uint64 = longSleeves ? 18446744073709551599ul : all;
+        let mRightMask: Uint64 = longSleeves ? 18446744073709551583ul : all;
+        ArrayPush(news, ArmSwapperStylePieceNew(StringToName(f + "hfpp"), n"a0_003_wa__mantisblade_holstered_left", wLeftHolstered, n"default", false, fLeftMask, false));
+        ArrayPush(news, ArmSwapperStylePieceNew(StringToName(f + "hfpp"), n"a0_003_wa__mantisblade_holstered_right", wRightHolstered, n"default", false, fRightMask, false));
+        ArrayPush(news, ArmSwapperStylePieceNew(StringToName(f + "hfpp"), n"a0_003_wa__mantisblade_holstered_upperarm_left", wUpperLeft, n"default", false, 0ul, true));
+        ArrayPush(news, ArmSwapperStylePieceNew(StringToName(f + "hfpp"), n"a0_003_wa__mantisblade_holstered_upperarm_right", wUpperRight, n"default", false, 0ul, true));
+        ArrayPush(news, ArmSwapperStylePieceNew(StringToName(f + "htpp"), n"a0_003_wa__mantisblade_photomode_left2804", wLeftHolstered, n"default", false, fLeftMask, false));
+        ArrayPush(news, ArmSwapperStylePieceNew(StringToName(f + "htpp"), n"a0_003_wa__mantisblade_photomode_right", wRightHolstered, n"default", false, fRightMask, false));
+        for mv in ["hfpp", "htpp"] {
+            let key: CName = StringToName(m + mv);
+            ArrayPush(news, ArmSwapperStylePieceNew(key, n"a0_003_ma__mantisblade_holstered_left6562", mLeftHolstered, n"default", false, mLeftMask, false));
+            ArrayPush(news, ArmSwapperStylePieceNew(key, n"a0_003_ma__mantisblade_holstered_right", mRightHolstered, n"default", false, mRightMask, false));
+            // third person (photo mode) keeps the plain upper arms, as for female V
+            if Equals(mv, "hfpp") {
+                ArrayPush(news, ArmSwapperStylePieceNew(key, n"a0_003_ma__mantisblade_holstered_upperarm_left", mUpperLeft, n"default", false, 0ul, true));
+                ArrayPush(news, ArmSwapperStylePieceNew(key, n"a0_003_ma__mantisblade_holstered_upperarm_right", mUpperRight, n"default", false, 0ul, true));
+            }
+        }
+    }
+
+    // Replace: the whole plain Monowire 7 rows (but the third person personal link), and every
+    // other plain row that a Barghest row covers
+    let wholeKeys: array<CName> = [n"f_monowire_7_arms", n"f_monowire_7_hfpp", n"f_monowire_7_htpp",
         n"m_monowire_7_arms", n"m_monowire_7_hfpp", n"m_monowire_7_htpp"];
     let kept: array<ref<ArmSwapperStylePiece>>;
     for p in pieces {
-        if !ArrayContains(replaced, p.key) || Equals(p.comp, n"a0_001__personal_link_tpp4537") {
-            ArrayPush(kept, p);
+        let drop: Bool = ArrayContains(wholeKeys, p.key) && NotEquals(p.comp, n"a0_001__personal_link_tpp4537");
+        if !drop {
+            for row in news {
+                if Equals(row.key, p.key) && Equals(row.comp, p.comp) { drop = true; }
+            }
         }
+        if !drop { ArrayPush(kept, p); }
     }
+    for row in news { ArrayPush(kept, row); }
     pieces = kept;
-    let all: Uint64 = 9223372036854775807ul;
-    let leftHolstered: Uint64 = 18446744073709550079ul;
-    // female V: arms out, holstered first person, holstered third person
-    ArrayPush(pieces, ArmSwapperStylePieceNew(n"f_monowire_7_arms", n"a0_002_wa__monowire_whip_l_cableless", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_wa__monowire_whip_l_barghest.mesh", n"default", true, all, false));
-    ArrayPush(pieces, ArmSwapperStylePieceNew(n"f_monowire_7_arms", n"a0_002_wa__monowire_whip_r_cableless", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_wa__monowire_whip_r_barghest.mesh", n"default", true, all, false));
-    ArrayPush(pieces, ArmSwapperStylePieceNew(n"f_monowire_7_hfpp", n"a0_002_wa__monowire_whip_l_cableless", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_wa__monowire_whip_l_cableless_barghest.mesh", n"default", true, leftHolstered, false));
-    ArrayPush(pieces, ArmSwapperStylePieceNew(n"f_monowire_7_hfpp", n"a0_002_wa__monowire_whip_r_cableless", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_wa__monowire_whip_r_barghest.mesh", n"default", true, all, false));
-    ArrayPush(pieces, ArmSwapperStylePieceNew(n"f_monowire_7_hfpp", n"a0_002_wa__monowire_whip_l_cableless5083", r"base\\characters\\cyberware\\player\\a0_002__monowire_whip\\a0_002_wa__monowire_whip_l_cableless.mesh", n"default", false, 0ul, true));
-    ArrayPush(pieces, ArmSwapperStylePieceNew(n"f_monowire_7_htpp", n"a0_002_wa__monowire_whip_l_cableless", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_wa__monowire_whip_l_tpp_barghest.mesh", n"default", true, all, false));
-    ArrayPush(pieces, ArmSwapperStylePieceNew(n"f_monowire_7_htpp", n"a0_002_wa__monowire_whip_r_cableless", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_wa__monowire_whip_r_tpp_barghest.mesh", n"default", true, all, false));
-    // male V (third person uses the holstered first person meshes, as the game does)
-    ArrayPush(pieces, ArmSwapperStylePieceNew(n"m_monowire_7_arms", n"a0_002_ma__monowire_whip_l", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_ma__monowire_whip_l_barghest.mesh", n"default", true, all, false));
-    ArrayPush(pieces, ArmSwapperStylePieceNew(n"m_monowire_7_arms", n"a0_002_ma__monowire_whip_r", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_ma__monowire_whip_r_barghest.mesh", n"default", true, all, false));
-    ArrayPush(pieces, ArmSwapperStylePieceNew(n"m_monowire_7_hfpp", n"a0_002_wa__monowire_whip_l_cableless", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_ma__monowire_whip_l_cableless_barghest.mesh", n"default", true, leftHolstered, false));
-    ArrayPush(pieces, ArmSwapperStylePieceNew(n"m_monowire_7_hfpp", n"a0_002_wa__monowire_whip_l_cableless4788", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_ma__monowire_whip_l_cableless_barghest.mesh", n"default", true, 18446744073709551104ul, false));
-    ArrayPush(pieces, ArmSwapperStylePieceNew(n"m_monowire_7_hfpp", n"a0_002_wa__monowire_whip_r_cableless", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_ma__monowire_whip_r_barghest.mesh", n"default", true, all, false));
-    ArrayPush(pieces, ArmSwapperStylePieceNew(n"m_monowire_7_htpp", n"a0_002_wa__monowire_whip_l_cableless", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_ma__monowire_whip_l_cableless_barghest.mesh", n"default", true, leftHolstered, false));
-    ArrayPush(pieces, ArmSwapperStylePieceNew(n"m_monowire_7_htpp", n"a0_002_wa__monowire_whip_l_cableless4788", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_ma__monowire_whip_l_cableless_barghest.mesh", n"default", true, 18446744073709551104ul, false));
-    ArrayPush(pieces, ArmSwapperStylePieceNew(n"m_monowire_7_htpp", n"a0_002_wa__monowire_whip_r_cableless", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_ma__monowire_whip_r_barghest.mesh", n"default", true, all, false));
 }
 
 // The Barghest style of each arm type (Mantis Blades also have a long-sleeve version)
@@ -2105,12 +2216,13 @@ public func ArmSwapperIsBarghestStyle(armsType: Int32, index: Int32) -> Bool {
     return false;
 }
 
-// Styles that keep V's own nails: the plain style, two Mantis Blade styles and one Monowire style
+// Styles that keep V's own nails: the plain style and the Barghest Monowire, whose hands are V's own
 public func ArmSwapperStyleKeepsOwnNails(armsType: Int32, index: Int32) -> Bool {
     // Gorilla Arms cover the hands: no own nails, as in the base game
     if armsType == 3 { return false; }
     if index <= 0 { return true; }
-    if armsType == 1 { return index == 10 || index == 19; }
+    // Every Mantis Blade style has chrome hands, Barghest (10, 19) included
+    if armsType == 1 { return false; }
     if armsType == 2 { return index == 7; }
     return true;
 }
@@ -2120,6 +2232,31 @@ public func ArmSwapperStyleKeepsOwnNails(armsType: Int32, index: Int32) -> Bool 
 public func ArmSwapperOwnNails(player: ref<PlayerPuppet>, comps: array<ref<IComponent>>, armsType: Int32, index: Int32) {
     let memory: ref<SimpleArmSwapperStyleMemory> = SimpleArmSwapperStyleMemory.Get(player.GetGame());
     if !IsDefined(memory) { return; }
+    // The Barghest Mantis Blades bring painted nails on their chrome hands; the Mantis Blades' own
+    // nail pieces (in V's nail colour) go off under it, and back on under other Mantis styles
+    if armsType == 1 {
+        if ArmSwapperIsBarghestStyle(armsType, index) {
+            for comp in comps {
+                if IsDefined(comp) && comp.IsEnabled() {
+                    let bladeNail: String = NameToString(comp.GetName());
+                    if StrBeginsWith(bladeNail, "a0_003_") && StrContains(bladeNail, "mantisblade_nails") {
+                        comp.Toggle(false);
+                        ArrayPush(memory.hiddenBladeNails, comp);
+                        ArmSwapperLog(player.GetGame(), "  Mantis nail piece " + bladeNail + " switched off under Barghest");
+                    }
+                }
+            }
+        } else {
+            if ArraySize(memory.hiddenBladeNails) > 0 {
+                for bladeNailComp in memory.hiddenBladeNails {
+                    let shownAgain: ref<IComponent> = bladeNailComp;
+                    if IsDefined(shownAgain) { shownAgain.Toggle(true); }
+                }
+                ArmSwapperLog(player.GetGame(), "  Mantis nail pieces shown again");
+                ArrayClear(memory.hiddenBladeNails);
+            }
+        }
+    }
     if ArmSwapperStyleKeepsOwnNails(armsType, index) {
         if ArraySize(memory.hiddenNails) > 0 {
             for nail in memory.hiddenNails {
