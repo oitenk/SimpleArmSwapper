@@ -2,12 +2,13 @@
 
 A Cyberpunk 2077 mod for swapping between multiple sets of arm cyberware on the fly, without visiting a Ripperdoc.
 
-Current version: **2.4.3**, for Cyberpunk 2077 2.5.
+Current version: **2.5.0**, for Cyberpunk 2077 2.5.
 
 ## Features
 
 - **Swap with the "4" key.** With arms drawn, press 4 to step to the next set of equipped arm cyberware.
 - **Swap with the weapon wheel.** The wheel's cyberware slot cycles through every equipped arm cyberware and bare fists, in both directions, using the wheel's previous/next keys. Select the slot to draw what it shows.
+- **Swap with a controller button.** With arms drawn, tap D-pad Left to step to the next set of arm cyberware. Holding D-pad Left still opens the pocket radio. The button can be changed in Mod Settings. Needs Input Loader.
 - **Arm memory.** Drawing your arms brings back the set you used last, not whatever is in the first slot. This carries across saves.
 - **Gorilla Arms function like vanilla.** They take the place of bare fists, so the wheel offers Gorilla Arms rather than a separate fists entry while they are installed.
 - **Third-person arms.** While your arms are put away, and while you fight with bare fists, the inventory, vehicles and mirrors show the arm cyberware you used last.
@@ -36,6 +37,7 @@ With [Mod Settings](https://github.com/jackhumbert/mod_settings) installed, thes
 - **Weapon Wheel Shows Next Arms** (on by default): while arms are drawn, the wheel's cyberware slot starts on the next arms in line, so selecting it swaps right away. Off: it starts on the arms you are holding.
 - **Show Last Used Arms When Holstered** (on by default): third-person views show your last used arms while they are put away. Off: the game and your other mods decide.
 - **Glamdoc Style Per Arm Type** (on by default): the Glamdoc styles each arm type separately and switching arms puts the matching style back. Off: styling works as in the base game.
+- **Controller Swap Button** (D-pad Left by default): the controller button that swaps arms when tapped. Needs Input Loader.
 - **Debug Logging** (off by default, under Troubleshooting): writes what the mod does with arms and styles to the Cyber Engine Tweaks game log. Leave it off unless asked for a log.
 
 Empty arm slots are skipped, and arm cyberware that is not a melee weapon (such as the Projectile Launch System) is left out of the rotation.
@@ -50,6 +52,7 @@ Optional:
 
 - [Codeware](https://github.com/psiberx/cp2077-codeware) - shows Glamdoc styles on Mantis Blades and Monowire outside the first arm slot, and lets the mod's text be translated. Without it those arms show their plain look.
 - [Mod Settings](https://github.com/jackhumbert/mod_settings) - adds the options above to the in-game Mod Settings menu. Without it the defaults apply.
+- [Input Loader](https://github.com/jackhumbert/cyberpunk2077-input-loader) - adds the controller swap button. Without it, swapping works with the 4 key and the weapon wheel as before.
 
 With only one arm cyberware equipped, the game behaves exactly as it does without the mod.
 
@@ -60,6 +63,7 @@ Install the release zip with a mod manager such as Vortex, or copy its `r6` fold
 ```
 Cyberpunk 2077/r6/scripts/simple_arm_swapper/SimpleArmSwapper.reds
 Cyberpunk 2077/r6/scripts/simple_arm_swapper/SimpleArmSwapperStyleData.reds
+Cyberpunk 2077/r6/input/SimpleArmSwapper.xml
 ```
 
 If you are updating from 1.x, delete the old `r6/scripts/SimpleArmSwapper.reds` first. Having both copies installed will stop the game's scripts from compiling.

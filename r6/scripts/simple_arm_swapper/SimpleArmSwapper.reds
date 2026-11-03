@@ -7,7 +7,7 @@ module SimpleArmSwapperMod
 @if(ModuleExists("Codeware.Localization"))
 import Codeware.Localization.*
 
-public func Version() -> String = "2.4.3"
+public func Version() -> String = "2.5.0"
 
 // Options shown in the Mod Settings menu. Mod Settings is optional: when it is installed it
 // writes the saved choice into this class's default values (at startup and whenever the
@@ -29,6 +29,12 @@ public class SimpleArmSwapperSettings {
     @runtimeProperty("ModSettings.displayName", "Glamdoc Style Per Arm Type")
     @runtimeProperty("ModSettings.description", "Let the Glamdoc style every arm cyberware type you have equipped, and keep a separate style for each type. Switching arms puts the matching style back. Turn off to leave styling to the game.")
     public let stylePerArmType: Bool = true;
+
+    // The name must match overridableUI in r6/input/SimpleArmSwapper.xml
+    @runtimeProperty("ModSettings.mod", "Simple Arm Swapper")
+    @runtimeProperty("ModSettings.displayName", "Controller Swap Button")
+    @runtimeProperty("ModSettings.description", "With arms drawn, tap this controller button to swap to the next arms. Holding it does what the button normally does on hold. Needs Input Loader.")
+    public let armSwapPadButton: EInputKey = EInputKey.IK_Pad_DigitLeft;
 
     @runtimeProperty("ModSettings.mod", "Simple Arm Swapper")
     @runtimeProperty("ModSettings.category", "Troubleshooting")
@@ -103,7 +109,44 @@ public func ArmSwapperArmsState(player: ref<GameObject>) -> String {
         + " styleSlot=" + ArmSwapperName(eqData.GetActiveItem(gamedataEquipmentArea.ArmsCWStyle));
 }
 
+// Controller swap button (the CycleArmCyberware action from r6/input/SimpleArmSwapper.xml,
+// which needs Input Loader). A tap swaps; a hold is left to the button's own hold action.
+public class ArmSwapperPadListener {
+    public let player: wref<PlayerPuppet>;
+    private let heldLong: Bool;
+
+    protected cb func OnAction(action: ListenerAction, consumer: ListenerActionConsumer) -> Bool {
+        if !Equals(ListenerAction.GetName(action), n"CycleArmCyberware") { return false; }
+        let actionType: gameinputActionType = ListenerAction.GetType(action);
+
+        if Equals(actionType, gameinputActionType.BUTTON_PRESSED) {
+            this.heldLong = false;
+        } else if Equals(actionType, gameinputActionType.BUTTON_HOLD_COMPLETE) {
+            this.heldLong = true;
+        } else if Equals(actionType, gameinputActionType.BUTTON_RELEASED) && !this.heldLong {
+            let player: ref<PlayerPuppet> = this.player;
+            if !IsDefined(player) { return false; }
+            ArmSwapperLog(player.GetGame(), "controller swap button tapped");
+            let swapper: ref<SimpleArmSwapper> = GameInstance.GetScriptableSystemsContainer(player.GetGame()).Get(n"SimpleArmSwapperMod.SimpleArmSwapper") as SimpleArmSwapper;
+            if IsDefined(swapper) {
+                swapper.SwapToNextArms(player);
+            }
+        }
+        return false;
+    }
+}
+
 public class SimpleArmSwapper extends ScriptableSystem {
+
+    private let m_padListener: ref<ArmSwapperPadListener>;
+
+    private func OnPlayerAttach(request: ref<PlayerAttachRequest>) -> Void {
+        let player: ref<PlayerPuppet> = request.owner as PlayerPuppet;
+        if !IsDefined(player) { return; }
+        this.m_padListener = new ArmSwapperPadListener();
+        this.m_padListener.player = player;
+        player.RegisterInputListener(this.m_padListener, n"CycleArmCyberware");
+    }
 
     // Returns every equipped arm cyberware carrying the 'Meleeware' tag, in slot order
     public func GetMeleewareItems(player: ref<GameObject>) -> array<ItemID> {
@@ -388,7 +431,7 @@ protected cb func OnAction(action: ListenerAction, consumer: ListenerActionConsu
     let actionName: CName = ListenerAction.GetName(action);
     let actionType: gameinputActionType = ListenerAction.GetType(action);
 
-    if (Equals(actionName, n"WeaponSlot4") || Equals(actionName, n"CycleArmCyberware")) && Equals(actionType, gameinputActionType.BUTTON_PRESSED) {
+    if Equals(actionName, n"WeaponSlot4") && Equals(actionType, gameinputActionType.BUTTON_PRESSED) {
         // Debug: the swap key also records V's head pieces as they are right now
         ArmSwapperCheckHead(this, "swap key", true);
         let swapper: ref<SimpleArmSwapper> = GameInstance.GetScriptableSystemsContainer(this.GetGame()).Get(n"SimpleArmSwapperMod.SimpleArmSwapper") as SimpleArmSwapper;

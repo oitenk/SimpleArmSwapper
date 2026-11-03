@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<!-- Simple Arm Swapper: controller button for swapping arms. Needs Input Loader.
+     Tap D-pad Left by default; holding it still opens the pocket radio.
+     With Mod Settings the button can be changed under "Simple Arm Swapper". -->
+<bindings>
+    <context name="Items" append="true">
+        <action name="CycleArmCyberware" map="SimpleArmSwapper_Swap_Button" />
+    </context>
+
+    <mapping name="SimpleArmSwapper_Swap_Button" type="Button" >
+        <button id="IK_Pad_DigitLeft" overridableUI="armSwapPadButton" />
+    </mapping>
+
+    <hold action="CycleArmCyberware" timeout="0.3" />
+
+    <acceptedEvents action="CycleArmCyberware" >
+        <event name="BUTTON_PRESSED" />
+        <event name="BUTTON_RELEASED" />
+        <event name="BUTTON_HOLD_COMPLETE" />
+    </acceptedEvents>
+</bindings>

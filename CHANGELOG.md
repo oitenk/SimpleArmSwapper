@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.0
+
+NEW! Controller swap button. With arms drawn, tap D-pad Left to swap to the next arms, like the 4 key on keyboard. Holding D-pad Left still opens the pocket radio. The button can be changed in Mod Settings. Needs Input Loader; without it, everything works as before.
+
 ## 2.4.3
 
 Fixed holstered Mantis Blade hands showing several styles on top of each other, as patches of different colours. Old copies of the hands kept coming back each time the blades were drawn and put away, more so after changing styles. A save reload cleared it; now it no longer builds up.
