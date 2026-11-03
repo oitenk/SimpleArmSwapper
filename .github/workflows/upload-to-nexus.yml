@@ -100,7 +100,7 @@ jobs:
           file_id: ${{ vars.NEXUSMODS_MAIN_FILE_ID }}
           filename: ${{ steps.package.outputs.zip_name }}
           display_name: Simple Arm Swapper
-          description: Swap between multiple sets of arm cyberware with the 4 key or the weapon wheel.
+          description: Swap between multiple sets of arm cyberware with the 4 key, a controller button or the weapon wheel.
           version: ${{ inputs.version }}
           category: main
           primary_mod_manager_download: true
