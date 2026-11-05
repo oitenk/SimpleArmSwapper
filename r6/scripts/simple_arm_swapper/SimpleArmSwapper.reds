@@ -1,5 +1,5 @@
 // r6/scripts/simple_arm_swapper/SimpleArmSwapper.reds
-// Simple Arm Swapper v2.4.1
+// Simple Arm Swapper v2.6.0
 
 // Other mods can detect this one with @if(ModuleExists("SimpleArmSwapperMod"))
 module SimpleArmSwapperMod
@@ -7,7 +7,7 @@ module SimpleArmSwapperMod
 @if(ModuleExists("Codeware.Localization"))
 import Codeware.Localization.*
 
-public func Version() -> String = "2.5.0"
+public func Version() -> String = "2.6.0"
 
 // Options shown in the Mod Settings menu. Mod Settings is optional: when it is installed it
 // writes the saved choice into this class's default values (at startup and whenever the
@@ -29,6 +29,11 @@ public class SimpleArmSwapperSettings {
     @runtimeProperty("ModSettings.displayName", "Glamdoc Style Per Arm Type")
     @runtimeProperty("ModSettings.description", "Let the Glamdoc style every arm cyberware type you have equipped, and keep a separate style for each type. Switching arms puts the matching style back. Turn off to leave styling to the game.")
     public let stylePerArmType: Bool = true;
+
+    @runtimeProperty("ModSettings.mod", "Simple Arm Swapper")
+    @runtimeProperty("ModSettings.displayName", "Hide Nail Items Under Gorilla Arms")
+    @runtimeProperty("ModSettings.description", "Gorilla Arms cover V's hands, so nail items worn in Equipment-EX's fingernail slots are hidden while V wears them, drawn or put away. Turn off to always show them.")
+    public let hideNailItemsUnderGorillaArms: Bool = true;
 
     // The name must match overridableUI in r6/input/SimpleArmSwapper.xml
     @runtimeProperty("ModSettings.mod", "Simple Arm Swapper")
@@ -292,6 +297,19 @@ public final const func GetActiveMeleeWare() -> ItemID {
             let itemID: ItemID = equipArea.equipSlots[activeIndex].itemID;
             if ItemID.IsValid(itemID) && TweakDBInterface.GetItemRecord(ItemID.GetTDBID(itemID)).TagsContains(n"Meleeware") {
                 return itemID;
+            }
+        }
+        // Firing the Projectile Launch System makes its slot the active one. The melee arms are
+        // still the ones used last (the game would answer with the first arms in the list, which
+        // then came back put away with another arm type's style)
+        let lastMelee: ItemID = this.m_lastUsedStruct.lastUsedMelee;
+        if ItemID.IsValid(lastMelee) && TweakDBInterface.GetItemRecord(ItemID.GetTDBID(lastMelee)).TagsContains(n"Meleeware") {
+            let i: Int32 = 0;
+            while i < ArraySize(equipArea.equipSlots) {
+                if equipArea.equipSlots[i].itemID == lastMelee {
+                    return lastMelee;
+                }
+                i += 1;
             }
         }
     }
@@ -820,8 +838,11 @@ public class SimpleArmSwapperStyleMemory extends ScriptableSystem {
     public let hiddenMasks: array<Uint64>;
     // V's own nail pieces switched off under a painted-nail style
     public let hiddenNails: array<wref<IComponent>>;
-    // Mantis Blade nail pieces switched off under the Barghest style
+    // Mantis Blade nail pieces switched off under a Mantis style
     public let hiddenBladeNails: array<wref<IComponent>>;
+    // Nail items taken out of Equipment-EX's fingernail slots under Gorilla Arms, to put back
+    public let hiddenNailSlots: array<TweakDBID>;
+    public let hiddenNailItems: array<ItemID>;
     // Arm pieces hidden because a style leaves them out; they may show again for another style
     private let m_hidForStyle: array<wref<IComponent>>;
 
@@ -1035,7 +1056,10 @@ public func ArmSwapperApplyStyleFor(armsItem: ItemID, opt fromGlamdoc: Bool) {
             styled = memory.IsEnabled(ownType) && ItemID.IsValid(memory.GetStyleItem(ownType));
         }
     }
-    this.ArmSwapperRefreshMaxTacLook(styled);
+    // The MaxTac look belongs to the melee arms; the launcher's style says nothing about it
+    if ArmSwapperArmsType(armsItem) != 0 {
+        this.ArmSwapperRefreshMaxTacLook(styled);
+    }
     if !(new SimpleArmSwapperSettings()).stylePerArmType { return; }
     if !IsDefined(memory) || (memory.glamdocOpen && !fromGlamdoc) { return; }
     let armsType: Int32 = ArmSwapperArmsType(armsItem);
@@ -1079,7 +1103,7 @@ public func ArmSwapperApplyStyleFor(armsItem: ItemID, opt fromGlamdoc: Bool) {
         this.savedData.brandDataID = TDBID.None();
         this.savedData.primaryColorIndex = Cast<Uint8>(0);
         this.savedData.secondaryColorIndex = Cast<Uint8>(0);
-        if NotEquals(ownSwitcher, n"None") {
+        if NotEquals(ownSwitcher, n"None") && !this.ArmSwapperHoldsBackSwitcher(ownSwitcher) {
             this.SetIndexForCustomizationSwitcher(ownSwitcher, Cast<Uint32>(0), true);
             ArmSwapperCheckHeadSoon(player, "after style switcher reset");
         }
@@ -1179,6 +1203,8 @@ private final func PlayerAttachedCallback(playerPuppet: ref<GameObject>) {
     wrappedMethod(playerPuppet);
     let attached: ref<PlayerPuppet> = playerPuppet as PlayerPuppet;
     if IsDefined(attached) { attached.m_armSwapperAttachTime = ArmSwapperNow(attached.GetGame()); }
+    this.m_armSwapperLauncherColoursOn = false;
+    this.ArmSwapperListenForLauncher(playerPuppet);
     ArmSwapperStartHeadWatch(attached);
     this.ArmSwapperRememberCurrentStyle();
     this.ArmSwapperApplyStyleForActiveArms();
@@ -1221,11 +1247,10 @@ public func ArmSwapperMakeActiveArms(arms: ItemID) -> Bool {
     return false;
 }
 
-// More than one melee arm cyberware type equipped. The Projectile Launch System does not count:
-// it cannot keep a style of its own beside melee arms.
+// More than one arm cyberware type equipped, the Projectile Launch System included
 public func ArmSwapperHasSeveralArmTypes(player: ref<GameObject>) -> Bool {
     let found: Int32 = 0;
-    let armsType: Int32 = 1;
+    let armsType: Int32 = 0;
     while armsType < 4 {
         if ItemID.IsValid(ArmSwapperEquippedArmsOfType(player, armsType)) {
             found += 1;
@@ -1239,10 +1264,80 @@ public func ArmSwapperHasSeveralArmTypes(player: ref<GameObject>) -> Bool {
 @addField(GlamDocGameController)
 private let m_armSwapperArmsAtOpen: ItemID;
 
-// The arms the menu is working on: V's active arms
+// True while the launcher tab is open beside melee arms. The menu then works on the launcher,
+// while V's active arms stay the melee arms.
+@addField(GlamDocGameController)
+private let m_armSwapperLauncherMode: Bool;
+
+@addMethod(GlamDocGameController)
+public func ArmSwapperInLauncherMode() -> Bool {
+    return this.m_armSwapperLauncherMode;
+}
+
+// The arms the menu is working on: the launcher on its tab beside melee arms, else V's active arms
 @addMethod(GlamDocGameController)
 private func ArmSwapperActiveArms() -> ItemID {
+    if this.m_armSwapperLauncherMode {
+        let launcher: ItemID = ArmSwapperEquippedArmsOfType(this.m_player, 0);
+        if ItemID.IsValid(launcher) { return launcher; }
+    }
     return EquipmentSystem.GetData(this.m_player).GetActiveMeleeWare();
+}
+
+// The launcher tab shows the launcher on the preview character, not the active melee arms
+@wrapMethod(GlamDocGameController)
+private final func UpdatePuppetWithCyberware(itemToEquip: ItemID) {
+    if this.m_armSwapperLauncherMode && (new SimpleArmSwapperSettings()).stylePerArmType {
+        let launcher: ItemID = ArmSwapperEquippedArmsOfType(this.m_player, 0);
+        if ItemID.IsValid(launcher) {
+            ArmSwapperLog(this.m_player.GetGame(), "glamdoc preview shows the launcher instead of " + ArmSwapperName(itemToEquip));
+            itemToEquip = launcher;
+            // The game only puts the arms in the preview's hand while a style is on; otherwise it
+            // shows the arms put away, which on this tab would be the melee arms. Without a style
+            // the preview wears the launcher put away instead, as the game shows a plain launcher.
+            // Launchers with no put-away version go in the hand, plain.
+            if !this.DoesPlayerHaveGlamEquipped() && !ItemID.IsValid(ArmSwapperLauncherHolstered(launcher)) {
+                this.m_armSwapperDressingLauncher = true;
+            }
+        }
+    }
+    wrappedMethod(itemToEquip);
+    this.m_armSwapperDressingLauncher = false;
+    this.ArmSwapperPreviewLauncherPutAway();
+}
+
+@addField(GlamDocGameController)
+private let m_armSwapperDressingLauncher: Bool;
+
+// The put-away (holstered) item of the launcher, if it has one
+public func ArmSwapperLauncherHolstered(launcher: ItemID) -> ItemID {
+    let record: ref<WeaponItem_Record> = TweakDBInterface.GetWeaponItemRecord(ItemID.GetTDBID(launcher));
+    if !IsDefined(record) || !IsDefined(record.HolsteredItem()) { return ItemID.None(); }
+    return ItemID.CreateQuery(record.HolsteredItem().GetID());
+}
+
+// Launcher tab without a style: the preview's put-away arms are the launcher's, not the melee arms
+@addMethod(GlamDocGameController)
+public func ArmSwapperPreviewLauncherPutAway() {
+    if !this.m_armSwapperLauncherMode || !(new SimpleArmSwapperSettings()).stylePerArmType || this.DoesPlayerHaveGlamEquipped() { return; }
+    let puppet: ref<GameObject> = this.m_previewPuppet;
+    if !IsDefined(puppet) { return; }
+    let holstered: ItemID = ArmSwapperLauncherHolstered(ArmSwapperEquippedArmsOfType(this.m_player, 0));
+    if !ItemID.IsValid(holstered) { return; }
+    let current: ref<ItemObject> = this.m_transactionSystem.GetItemInSlot(puppet, t"AttachmentSlots.RightArm");
+    if IsDefined(current) && ItemID.GetTDBID(current.GetItemID()) == ItemID.GetTDBID(holstered) { return; }
+    this.m_transactionSystem.RemoveItemFromSlot(puppet, t"AttachmentSlots.RightArm");
+    if !this.m_transactionSystem.HasItem(puppet, holstered) {
+        this.m_transactionSystem.GiveItem(puppet, holstered, 1);
+    }
+    this.m_transactionSystem.AddItemToSlot(puppet, t"AttachmentSlots.RightArm", holstered);
+    ArmSwapperLog(this.m_player.GetGame(), "glamdoc preview wears the launcher put away: " + ArmSwapperName(holstered));
+}
+
+@wrapMethod(GlamDocGameController)
+public func DoesPlayerHaveGlamEquipped() -> Bool {
+    if this.m_armSwapperDressingLauncher { return true; }
+    return wrappedMethod();
 }
 
 // Locks in what has been done so far in this visit: "discard changes" (Back) will only undo
@@ -1273,11 +1368,15 @@ private func ArmSwapperSwitchTo(arms: ItemID) {
         + " preview hand=" + ArmSwapperSlotName(this.m_previewPuppet, t"AttachmentSlots.WeaponRight"));
     let eqData: ref<EquipmentSystemPlayerData> = EquipmentSystem.GetData(player);
     if !IsDefined(eqData) { return; }
-    if !eqData.ArmSwapperMakeActiveArms(arms) { return; }
+    // The launcher never becomes the active arms: the melee arms stay V's arms
+    let toLauncher: Bool = ArmSwapperArmsType(arms) == 0;
+    if !toLauncher && !eqData.ArmSwapperMakeActiveArms(arms) { return; }
     // A style previewed for the previous arms does not carry over
     this.m_armSwapperPreviewItem = ItemID.None();
     // The holstered arms in third person follow along
-    EquipmentSystemPlayerData.UpdateArmSlot(player, arms, true);
+    if !toLauncher {
+        EquipmentSystemPlayerData.UpdateArmSlot(player, arms, true);
+    }
 
     let system: ref<CyberwareCustomizationSystem> = GameInstance.GetScriptableSystemsContainer(player.GetGame()).Get(n"CyberwareCustomizationSystem") as CyberwareCustomizationSystem;
     if IsDefined(system) {
@@ -1345,6 +1444,7 @@ protected cb func OnUninitialize() -> Bool {
         memory.glamdocOpen = false;
         memory.glamdoc = null;
     }
+    this.m_armSwapperLauncherMode = false;
 
     // The game puts V's weapons away while the menu is open and draws them again after it
     // closes; ArmSwapperArmsInHand matches the style to whatever arms come back.
@@ -1362,6 +1462,8 @@ private final func DiscardChangesAndQuitVendor() {
     ArmSwapperLog(this.m_player.GetGame(), "glamdoc closing without applying (changes to discard: " + BoolToString(this.m_hasChangesToApply) + ")");
     let memory: ref<SimpleArmSwapperStyleMemory> = SimpleArmSwapperStyleMemory.Get(this.m_player.GetGame());
     if IsDefined(memory) { memory.RestoreSnapshot(); }
+    // Back to the melee arms; the launcher was never V's active arms
+    this.m_armSwapperLauncherMode = false;
     if ItemID.IsValid(this.m_armSwapperArmsAtOpen) && !(this.m_armSwapperArmsAtOpen == this.ArmSwapperActiveArms()) {
         let player: ref<PlayerPuppet> = this.m_player as PlayerPuppet;
         let eqData: ref<EquipmentSystemPlayerData> = EquipmentSystem.GetData(player);
@@ -1421,12 +1523,14 @@ protected cb func OnSelectorChange(evt: ref<GlamdocSelectorChangeEvent>) -> Bool
     if Equals(this.m_filterArea, ArmsWareType.MantisBlades) { tabType = 1; }
     if Equals(this.m_filterArea, ArmsWareType.NanoWires) { tabType = 2; }
     if Equals(this.m_filterArea, ArmsWareType.StrongArms) { tabType = 3; }
-    // Only melee arms are switched to. The launcher tab keeps the game's behaviour: the launcher
-    // cannot keep a style of its own beside melee arms.
-    if tabType < 1 { return result; }
+    if tabType < 0 { return result; }
     let arms: ItemID = ArmSwapperEquippedArmsOfType(this.m_player, tabType);
+    // The launcher tab works on the launcher while the melee arms stay V's arms. A launcher with no
+    // melee arms beside it is V's arms already, and keeps the game's behaviour.
+    let toLauncher: Bool = tabType == 0;
+    if toLauncher && ArmSwapperArmsType(EquipmentSystem.GetData(this.m_player).GetActiveMeleeWare()) < 1 { return result; }
     ArmSwapperLog(this.m_player.GetGame(), "glamdoc tab " + IntToString(tabType) + " -> arms " + ArmSwapperName(arms));
-    if ItemID.IsValid(arms) && ArmSwapperArmsType(this.ArmSwapperActiveArms()) != tabType {
+    if ItemID.IsValid(arms) && (NotEquals(this.m_armSwapperLauncherMode, toLauncher) || ArmSwapperArmsType(this.ArmSwapperActiveArms()) != tabType) {
         // Leave a preview first. Otherwise the tab shows the other arms' styles while V keeps
         // the previous arms, and none of those styles can be picked. A style just bought is
         // kept (the menu is only waiting for the preview character); one only previewed is undone.
@@ -1437,6 +1541,7 @@ protected cb func OnSelectorChange(evt: ref<GlamdocSelectorChangeEvent>) -> Bool
             this.m_isPuppetWaitingForPreviewModeExit = false;
             this.m_isProcessingCustomizationChange = false;
         }
+        this.m_armSwapperLauncherMode = toLauncher;
         this.ArmSwapperSwitchTo(arms);
     }
     return result;
@@ -1544,7 +1649,7 @@ private final func ShowPuppetPreviewOnceItemsVisualsAreUpdated(slot: TweakDBID, 
         + ", clears " + TDBID.ToStringDEBUG(this.m_slotToClear) + ")");
     }
     // Style the preview character before the game shows it, so it never appears unstyled
-    if slot == t"AttachmentSlots.RightArm" || slot == t"AttachmentSlots.WeaponRight" {
+    if slot == t"AttachmentSlots.RightArm" || slot == t"AttachmentSlots.WeaponRight" || slot == t"AttachmentSlots.WeaponLeft" {
         let memory: ref<SimpleArmSwapperStyleMemory> = SimpleArmSwapperStyleMemory.Get(this.m_player.GetGame());
         if IsDefined(memory) {
             let glamdoc: ref<GlamDocGameController> = memory.glamdoc;
@@ -1554,6 +1659,13 @@ private final func ShowPuppetPreviewOnceItemsVisualsAreUpdated(slot: TweakDBID, 
         }
     }
     wrappedMethod(slot, item);
+    // The game can bring the melee arms back as the preview's put-away arms on the launcher tab
+    if slot == t"AttachmentSlots.RightArm" {
+        let tabMemory: ref<SimpleArmSwapperStyleMemory> = SimpleArmSwapperStyleMemory.Get(this.m_player.GetGame());
+        if IsDefined(tabMemory) && IsDefined(tabMemory.glamdoc) {
+            tabMemory.glamdoc.ArmSwapperPreviewLauncherPutAway();
+        }
+    }
 }
 
 // The preview character's arms just arrived: style it with whatever it should show right now
@@ -1944,8 +2056,9 @@ public func ArmSwapperStylePiecesOf(player: ref<PlayerPuppet>, owner: ref<Entity
     if !(new SimpleArmSwapperSettings()).stylePerArmType || !IsDefined(player) || !IsDefined(owner) { return -1; }
     let game: GameInstance = player.GetGame();
     let armsType: Int32 = ArmSwapperArmsType(arms);
-    // Mantis Blades and Monowire only: the game styles Gorilla Arms itself wherever they sit
-    if armsType < 1 || armsType > 2 { return -1; }
+    // Projectile Launch System, Mantis Blades and Monowire: the game styles Gorilla Arms itself
+    // wherever they sit
+    if armsType < 0 || armsType > 2 { return -1; }
     let memory: ref<SimpleArmSwapperStyleMemory> = SimpleArmSwapperStyleMemory.Get(game);
     if !IsDefined(memory) { return -1; }
     // The Glamdoc preview character shows the style being previewed, else the saved one, else
@@ -2125,7 +2238,20 @@ public func ArmSwapperStylePiecesOf(player: ref<PlayerPuppet>, owner: ref<Entity
         ArmSwapperLog(game, "styled pieces (" + reason + ") for " + ArmSwapperName(arms) + ": " + NameToString(armsKey)
             + (useElement ? " + " + NameToString(element) : "") + ", " + IntToString(changed) + " changes on " + IntToString(found) + " pieces");
     }
-    if owner == player {
+    // Copies of V (photo mode, inventory, Glamdoc preview): the Mantis Blades' own nail pieces go off
+    // under a Mantis style, as on V. These characters are built fresh, so nothing to bring back.
+    if owner != player && armsType == 1 && index > 0 {
+        for nailComp in comps {
+            if IsDefined(nailComp) && nailComp.IsEnabled() {
+                let copyNail: String = NameToString(nailComp.GetName());
+                if StrBeginsWith(copyNail, "a0_003_") && StrContains(copyNail, "mantisblade_nails") {
+                    nailComp.Toggle(false);
+                }
+            }
+        }
+    }
+    // The launcher comes out beside the melee arms, which keep their own nails and pieces
+    if owner == player && armsType > 0 {
         // Leftover holstered Mantis hands while the blades are out (MaxTac-based blades after a style
         // change): hide them until the blades are put away
         if isOut && !isPreview && armsType == 1 {
@@ -2299,17 +2425,18 @@ public func ArmSwapperStyleKeepsOwnNails(armsType: Int32, index: Int32) -> Bool 
 public func ArmSwapperOwnNails(player: ref<PlayerPuppet>, comps: array<ref<IComponent>>, armsType: Int32, index: Int32) {
     let memory: ref<SimpleArmSwapperStyleMemory> = SimpleArmSwapperStyleMemory.Get(player.GetGame());
     if !IsDefined(memory) { return; }
-    // The Barghest Mantis Blades bring painted nails on their chrome hands; the Mantis Blades' own
-    // nail pieces (in V's nail colour) go off under it, and back on under other Mantis styles
+    // The Mantis Blades' own nail pieces (in V's nail colour) belong to the plain style. Every Mantis
+    // style replaces them: brand styles with an empty nail entry, Barghest with painted chrome
+    // hands. They go off under a style and back on without one.
     if armsType == 1 {
-        if ArmSwapperIsBarghestStyle(armsType, index) {
+        if index > 0 {
             for comp in comps {
                 if IsDefined(comp) && comp.IsEnabled() {
                     let bladeNail: String = NameToString(comp.GetName());
                     if StrBeginsWith(bladeNail, "a0_003_") && StrContains(bladeNail, "mantisblade_nails") {
                         comp.Toggle(false);
                         ArrayPush(memory.hiddenBladeNails, comp);
-                        ArmSwapperLog(player.GetGame(), "  Mantis nail piece " + bladeNail + " switched off under Barghest");
+                        ArmSwapperLog(player.GetGame(), "  Mantis nail piece " + bladeNail + " switched off under style " + IntToString(index));
                     }
                 }
             }
@@ -2471,7 +2598,7 @@ public class ArmSwapperStylePiecesCallback extends DelayCallback {
 
 // Styles now and again over the next moment, while the given item stays in the given slot
 public func ArmSwapperStylePiecesSoon(player: ref<PlayerPuppet>, target: ref<Entity>, arms: ItemID, view: CName, slot: TweakDBID, slotItem: ItemID, opt longer: Bool) {
-    if !IsDefined(player) || !IsDefined(target) || ArmSwapperArmsType(arms) < 1 { return; }
+    if !IsDefined(player) || !IsDefined(target) || ArmSwapperArmsType(arms) < 0 { return; }
     ArmSwapperStylePiecesOf(player, target, arms, "attached", view);
     let delays: array<Float> = [0.05, 0.25, 0.75];
     if longer {
@@ -2582,10 +2709,291 @@ public func OnItemEquippedVisual(slot: TweakDBID, item: ItemID) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Nail items under Gorilla Arms. Equipment-EX has fingernail slots that nail mods use; their nails
+// are shaped for V's own hands, and showed on top of the Gorilla Arms' metal fingers. While V wears
+// Gorilla Arms (drawn or put away) the items in those slots are taken off, on V and on her copies
+// (photo mode, inventory, Glamdoc preview). Without Equipment-EX the slots are simply empty.
+// ---------------------------------------------------------------------------
+
+// Slots whose items decide whether nail items show
+public func ArmSwapperNailsMatter(slot: TweakDBID) -> Bool {
+    return slot == t"AttachmentSlots.RightArm" || slot == t"AttachmentSlots.WeaponRight"
+        || slot == t"OutfitSlots.FingernailsLeft" || slot == t"OutfitSlots.FingernailsRight";
+}
+
+// Gorilla Arms in the hand, or put away as the arms V shows
+public func ArmSwapperWearsGorillaArms(player: ref<PlayerPuppet>, owner: ref<GameObject>) -> Bool {
+    let ts: ref<TransactionSystem> = GameInstance.GetTransactionSystem(player.GetGame());
+    let inHand: ref<ItemObject> = ts.GetItemInSlot(owner, t"AttachmentSlots.WeaponRight");
+    if IsDefined(inHand) && ArmSwapperArmsType(inHand.GetItemID()) == 3 { return true; }
+    let holstered: ref<ItemObject> = ts.GetItemInSlot(owner, t"AttachmentSlots.RightArm");
+    return IsDefined(holstered) && ArmSwapperArmsType(ArmSwapperArmsForHolstered(player, holstered.GetItemID())) == 3;
+}
+
+// Takes the items out of Equipment-EX's fingernail slots while V wears Gorilla Arms, and puts them
+// back afterwards. Only what is shown changes: Equipment-EX keeps the items in its outfit and puts
+// them back by itself (after a load, for one), when this is simply done again.
+public func ArmSwapperGorillaNails(player: ref<PlayerPuppet>, owner: ref<GameObject>) {
+    if !IsDefined(player) || !IsDefined(owner) { return; }
+    let memory: ref<SimpleArmSwapperStyleMemory> = SimpleArmSwapperStyleMemory.Get(player.GetGame());
+    if !IsDefined(memory) { return; }
+    let ts: ref<TransactionSystem> = GameInstance.GetTransactionSystem(player.GetGame());
+    let hide: Bool = (new SimpleArmSwapperSettings()).hideNailItemsUnderGorillaArms && ArmSwapperWearsGorillaArms(player, owner);
+    if !hide {
+        // Only V gets her nails back; her copies (photo mode, inventory, Glamdoc) are built fresh
+        if owner == player && ArraySize(memory.hiddenNailSlots) > 0 {
+            let i: Int32 = 0;
+            while i < ArraySize(memory.hiddenNailSlots) {
+                if ts.IsSlotEmpty(player, memory.hiddenNailSlots[i]) {
+                    ts.AddItemToSlot(player, memory.hiddenNailSlots[i], memory.hiddenNailItems[i], true);
+                }
+                i += 1;
+            }
+            ArrayClear(memory.hiddenNailSlots);
+            ArrayClear(memory.hiddenNailItems);
+            ArmSwapperLog(player.GetGame(), "nail items put back");
+        }
+        return;
+    }
+    let slots: array<TweakDBID> = [t"OutfitSlots.FingernailsLeft", t"OutfitSlots.FingernailsRight"];
+    for slot in slots {
+        let nails: ref<ItemObject> = ts.GetItemInSlot(owner, slot);
+        if IsDefined(nails) {
+            let nailItem: ItemID = nails.GetItemID();
+            ts.RemoveItemFromSlot(owner, slot);
+            if owner == player {
+                ArrayPush(memory.hiddenNailSlots, slot);
+                ArrayPush(memory.hiddenNailItems, nailItem);
+            }
+            ArmSwapperLog(player.GetGame(), "nail item " + ArmSwapperName(nailItem) + " taken off " + TDBID.ToStringDEBUG(slot) + " under Gorilla Arms");
+        }
+    }
+}
+
+
+public class ArmSwapperGorillaNailsCallback extends DelayCallback {
+    public let player: wref<PlayerPuppet>;
+    public let owner: wref<GameObject>;
+
+    public func Call() -> Void {
+        ArmSwapperGorillaNails(this.player, this.owner);
+    }
+}
+
+// Slots change over a few frames (a holstered item comes off as another goes on): check again shortly
+public func ArmSwapperGorillaNailsSoon(player: ref<PlayerPuppet>, opt owner: ref<GameObject>) {
+    if !IsDefined(player) { return; }
+    if !IsDefined(owner) { owner = player; }
+    let delays: array<Float> = [0.1, 0.5];
+    for delay in delays {
+        let callback: ref<ArmSwapperGorillaNailsCallback> = new ArmSwapperGorillaNailsCallback();
+        callback.player = player;
+        callback.owner = owner;
+        GameInstance.GetDelaySystem(player.GetGame()).DelayCallback(callback, delay, false);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The Projectile Launch System beside melee arms.
+//
+// The launcher comes out in V's left hand next to the melee arms. The game styles arm cyberware
+// from one owner, the melee arms, so the launcher showed its plain look. While it is out, the mod
+// styles its pieces with the launcher's own saved style and paints the launcher's colours. The
+// game holds one colour set for all arm cyberware, so melee arms on screen wear the launcher's
+// colours too until it goes away; then the melee arms' colours come back.
+// A launcher with no melee arms beside it is left to the game, which styles it as usual.
+// ---------------------------------------------------------------------------
+
+// Melee arm cyberware (Mantis Blades, Monowire, Gorilla Arms) equipped in any arm slot
+public func ArmSwapperHasMeleeArms(player: ref<GameObject>) -> Bool {
+    let armsType: Int32 = 1;
+    while armsType < 4 {
+        if ItemID.IsValid(ArmSwapperEquippedArmsOfType(player, armsType)) { return true; }
+        armsType += 1;
+    }
+    return false;
+}
+
+// Watches V's left hand for the launcher. A listener of the mod's own, so it never clashes with
+// other mods changing the game's callbacks.
+public class ArmSwapperLauncherSlotCallback extends AttachmentSlotsScriptCallback {
+    public let system: wref<CyberwareCustomizationSystem>;
+
+    public func OnItemEquippedVisual(slot: TweakDBID, item: ItemID) -> Void {
+        let system: ref<CyberwareCustomizationSystem> = this.system;
+        if !IsDefined(system) { return; }
+        if slot == t"AttachmentSlots.WeaponLeft" && ArmSwapperArmsType(item) == 0 {
+            system.ArmSwapperLauncherOut(item);
+        }
+        if ArmSwapperNailsMatter(slot) {
+            ArmSwapperGorillaNailsSoon(system.ArmSwapperPlayer());
+        }
+    }
+
+    public func OnItemUnequipped(slot: TweakDBID, item: ItemID) -> Void {
+        let system: ref<CyberwareCustomizationSystem> = this.system;
+        if !IsDefined(system) { return; }
+        if slot == t"AttachmentSlots.WeaponLeft" && ArmSwapperArmsType(item) == 0 {
+            system.ArmSwapperLauncherAway(item);
+        }
+        if ArmSwapperNailsMatter(slot) {
+            ArmSwapperGorillaNailsSoon(system.ArmSwapperPlayer());
+        }
+    }
+}
+
+// The launcher's style switcher stays off V while melee arms are equipped. Setting it adds the
+// launcher's holstered arm and nail pieces to V for the rest of the session, beside the melee
+// arms: a floating holstered launcher arm on menu characters, and V's own nails over styled
+// hands. The mod paints the launcher's pieces itself instead, while it is out.
+@addMethod(CyberwareCustomizationSystem)
+public func ArmSwapperHoldsBackSwitcher(switcherName: CName) -> Bool {
+    if !Equals(switcherName, n"launcher") || !(new SimpleArmSwapperSettings()).stylePerArmType { return false; }
+    // The Glamdoc's launcher tab needs it to show the launcher on its preview character. The
+    // pieces it leaves behind are hidden on menu characters (ArmSwapperHideStrayLauncher).
+    let memory: ref<SimpleArmSwapperStyleMemory> = SimpleArmSwapperStyleMemory.Get(this.GetGameInstance());
+    if IsDefined(memory) && memory.glamdocOpen && IsDefined(memory.glamdoc) && memory.glamdoc.ArmSwapperInLauncherMode() { return false; }
+    return ArmSwapperHasMeleeArms(this.m_playerPuppet);
+}
+
+// Launcher pieces on a menu character (inventory, Glamdoc) that does not hold the launcher. Once the
+// launcher's style switcher was set in the Glamdoc, the game adds the launcher's holstered arm to
+// these characters for the rest of the session, where it floats beside the melee arms.
+@if(ModuleExists("Codeware"))
+public func ArmSwapperHideStrayLauncher(player: ref<PlayerPuppet>, owner: ref<GameObject>) {
+    if !IsDefined(player) || !IsDefined(owner) || !(new SimpleArmSwapperSettings()).stylePerArmType { return; }
+    let launcher: ItemID = ArmSwapperEquippedArmsOfType(player, 0);
+    if !ItemID.IsValid(launcher) || !ArmSwapperHasMeleeArms(player) { return; }
+    let ts: ref<TransactionSystem> = GameInstance.GetTransactionSystem(player.GetGame());
+    let inLeft: ref<ItemObject> = ts.GetItemInSlot(owner, t"AttachmentSlots.WeaponLeft");
+    if IsDefined(inLeft) && ArmSwapperArmsType(inLeft.GetItemID()) == 0 { return; }
+    let holstered: ref<ItemObject> = ts.GetItemInSlot(owner, t"AttachmentSlots.RightArm");
+    let record: ref<WeaponItem_Record> = TweakDBInterface.GetWeaponItemRecord(ItemID.GetTDBID(launcher));
+    if IsDefined(holstered) && IsDefined(record) && IsDefined(record.HolsteredItem())
+        && record.HolsteredItem().GetID() == ItemID.GetTDBID(holstered.GetItemID()) { return; }
+    let hidden: Int32 = 0;
+    for comp in owner.GetComponents() {
+        // Every a0_006 piece belongs to the launcher
+        if IsDefined(comp) && comp.IsEnabled() && StrBeginsWith(NameToString(comp.GetName()), "a0_006_") {
+            comp.Toggle(false);
+            hidden += 1;
+        }
+    }
+    if hidden > 0 {
+        ArmSwapperLog(player.GetGame(), "hid " + IntToString(hidden) + " stray launcher pieces on a menu character");
+    }
+}
+
+@if(!ModuleExists("Codeware"))
+public func ArmSwapperHideStrayLauncher(player: ref<PlayerPuppet>, owner: ref<GameObject>) {}
+
+@wrapMethod(CyberwareCustomizationSystem)
+public func RestoreCyberwareCustomization(forcePlayerCustomization: Bool) {
+    if this.ArmSwapperHoldsBackSwitcher(this.savedData.switcherName) {
+        // Saved and coloured as usual, only the switcher is left alone
+        this.SetCustomizationParameters(this.savedData.enabled, Color.ToLinear(CyberwareCustomizationPersistentData.GetPrimaryColor(this.savedData)),
+            Color.ToLinear(CyberwareCustomizationPersistentData.GetSecondaryColor(this.savedData)));
+        ArmSwapperLog(this.GetGameInstance(), "launcher style kept off V beside melee arms: " + ArmSwapperStyleDataText(this.savedData));
+        return;
+    }
+    wrappedMethod(forcePlayerCustomization);
+}
+
+@addField(CyberwareCustomizationSystem)
+private let m_armSwapperLauncherListener: ref<AttachmentSlotsScriptListener>;
+
+// True while the launcher's colours are painted over the melee arms' colours
+@addField(CyberwareCustomizationSystem)
+private let m_armSwapperLauncherColoursOn: Bool;
+
+@addMethod(CyberwareCustomizationSystem)
+public func ArmSwapperListenForLauncher(player: ref<GameObject>) {
+    if !IsDefined(player) { return; }
+    let ts: ref<TransactionSystem> = GameInstance.GetTransactionSystem(this.GetGameInstance());
+    if IsDefined(this.m_armSwapperLauncherListener) {
+        ts.UnregisterAttachmentSlotListener(player, this.m_armSwapperLauncherListener);
+    }
+    let callback: ref<ArmSwapperLauncherSlotCallback> = new ArmSwapperLauncherSlotCallback();
+    callback.system = this;
+    this.m_armSwapperLauncherListener = ts.RegisterAttachmentSlotListener(player, callback);
+}
+
+// Paints the launcher's colours (launcherOut) or puts the colours of the style in use back
+@addMethod(CyberwareCustomizationSystem)
+public func ArmSwapperLauncherColours(launcherOut: Bool) {
+    if !launcherOut {
+        if !this.m_armSwapperLauncherColoursOn { return; }
+        this.m_armSwapperLauncherColoursOn = false;
+        this.SetCustomizationParameters(this.savedData.enabled, Color.ToLinear(CyberwareCustomizationPersistentData.GetPrimaryColor(this.savedData)),
+            Color.ToLinear(CyberwareCustomizationPersistentData.GetSecondaryColor(this.savedData)));
+        ArmSwapperLog(this.GetGameInstance(), "launcher away: colours of the arms in use back. " + ArmSwapperStyleDataText(this.savedData));
+        return;
+    }
+    let memory: ref<SimpleArmSwapperStyleMemory> = SimpleArmSwapperStyleMemory.Get(this.GetGameInstance());
+    if !IsDefined(memory) || !memory.HasStyle(0) || !memory.IsEnabled(0) { return; }
+    let styleItem: ItemID = memory.GetStyleItem(0);
+    if !ItemID.IsValid(styleItem) { return; }
+    let record: ref<UIGlamdocCustomizationItem_Record> = TweakDBInterface.GetUIGlamdocCustomizationItemRecord(ItemID.GetTDBID(styleItem));
+    if !IsDefined(record) || !IsDefined(record.BrandHandle()) { return; }
+    let primary: Color = CyberwareCustomizationHelper.GetColorFromBrandData(record.BrandHandle(), Cast<Uint8>(memory.GetPrimaryColor(0)));
+    let secondary: Color = CyberwareCustomizationHelper.GetColorFromBrandData(record.BrandHandle(), Cast<Uint8>(memory.GetSecondaryColor(0)));
+    this.SetCustomizationParameters(true, Color.ToLinear(primary), Color.ToLinear(secondary));
+    this.m_armSwapperLauncherColoursOn = true;
+    ArmSwapperLog(this.GetGameInstance(), "launcher out: its colours " + ArmSwapperColorText(primary) + " and " + ArmSwapperColorText(secondary)
+        + " (" + ArmSwapperName(styleItem) + ")");
+}
+
+@addMethod(CyberwareCustomizationSystem)
+public func ArmSwapperLauncherOut(launcher: ItemID) {
+    let player: ref<PlayerPuppet> = this.ArmSwapperPlayer();
+    if !IsDefined(player) || !(new SimpleArmSwapperSettings()).stylePerArmType { return; }
+    let memory: ref<SimpleArmSwapperStyleMemory> = SimpleArmSwapperStyleMemory.Get(this.GetGameInstance());
+    if IsDefined(memory) && memory.glamdocOpen { return; }
+    if !ArmSwapperHasMeleeArms(player) { return; }
+    ArmSwapperLog(this.GetGameInstance(), "launcher out beside melee arms: " + ArmSwapperName(launcher) + ". " + ArmSwapperArmsState(player));
+    this.ArmSwapperLauncherColours(true);
+    ArmSwapperStylePiecesSoon(player, player, launcher, n"out", t"AttachmentSlots.WeaponLeft", launcher);
+    ArmSwapperDumpLauncherSoon(player);
+}
+
+@addMethod(CyberwareCustomizationSystem)
+public func ArmSwapperLauncherAway(launcher: ItemID) {
+    ArmSwapperLog(this.GetGameInstance(), "launcher away: " + ArmSwapperName(launcher));
+    this.ArmSwapperLauncherColours(false);
+}
+
+// Debug: the pieces of the launcher item itself, once it is in V's hand
+public class ArmSwapperLauncherDumpCallback extends DelayCallback {
+    public let player: wref<PlayerPuppet>;
+
+    public func Call() -> Void {
+        let player: ref<PlayerPuppet> = this.player;
+        if !IsDefined(player) { return; }
+        let launcher: ref<ItemObject> = GameInstance.GetTransactionSystem(player.GetGame()).GetItemInSlot(player, t"AttachmentSlots.WeaponLeft");
+        if IsDefined(launcher) {
+            ArmSwapperDumpMeshes(player.GetGame(), launcher, "launcher item");
+        }
+    }
+}
+
+public func ArmSwapperDumpLauncherSoon(player: ref<PlayerPuppet>) {
+    if !(new SimpleArmSwapperSettings()).debugLogging || !IsDefined(player) { return; }
+    let callback: ref<ArmSwapperLauncherDumpCallback> = new ArmSwapperLauncherDumpCallback();
+    callback.player = player;
+    GameInstance.GetDelaySystem(player.GetGame()).DelayCallback(callback, 0.5, false);
+}
+
 // Photo mode builds its own copy of V; its holstered arms use the third person pieces
 @wrapMethod(PhotoModePlayerEntityComponent)
 protected cb func OnItemVisualsAddedToSlot(evt: ref<ItemVisualsAddedToSlot>) -> Bool {
     let result: Bool = wrappedMethod(evt);
+    if ArmSwapperNailsMatter(evt.GetSlotID()) {
+        let nailOwner: ref<GameObject> = this.GetOwner() as GameObject;
+        if IsDefined(nailOwner) {
+            ArmSwapperGorillaNailsSoon(GetPlayer(nailOwner.GetGame()), nailOwner);
+        }
+    }
     // Arms drawn when photo mode opened: style them like V's arms in hand
     if evt.GetSlotID() == t"AttachmentSlots.WeaponRight" && ArmSwapperArmsType(evt.GetItemID()) > 0 {
         let photoOwner: ref<GameObject> = this.GetOwner() as GameObject;
@@ -2630,10 +3038,18 @@ public func ArmSwapperStylePreviewNow(styleItem: ItemID, run: Int32, reason: Str
     let puppet: ref<GameObject> = this.m_previewPuppet;
     if !IsDefined(player) || !IsDefined(puppet) { return; }
     let arms: ItemID = this.ArmSwapperActiveArms();
-    if ArmSwapperArmsType(arms) < 1 { return; }
+    let armsType: Int32 = ArmSwapperArmsType(arms);
+    ArmSwapperGorillaNails(player, puppet);
+    // On the launcher tab the launcher is on its way to the preview's hand; elsewhere its pieces are strays
+    if !this.m_armSwapperLauncherMode {
+        ArmSwapperHideStrayLauncher(player, puppet);
+    }
+    if armsType < 0 || (armsType == 0 && !this.m_armSwapperLauncherMode) { return; }
     // The preview shows the arms out, with the same pieces V wears with arms out; until the arms
-    // arrive in its hand it wears them holstered (third person pieces)
-    let inHand: ref<ItemObject> = GameInstance.GetTransactionSystem(player.GetGame()).GetItemInSlot(puppet, t"AttachmentSlots.WeaponRight");
+    // arrive in its hand it wears them holstered (third person pieces). The launcher is held in
+    // the left hand.
+    let handSlot: TweakDBID = armsType == 0 ? t"AttachmentSlots.WeaponLeft" : t"AttachmentSlots.WeaponRight";
+    let inHand: ref<ItemObject> = GameInstance.GetTransactionSystem(player.GetGame()).GetItemInSlot(puppet, handSlot);
     let armsOut: Bool = IsDefined(inHand) && ItemID.GetTDBID(inHand.GetItemID()) == ItemID.GetTDBID(arms);
     ArmSwapperStylePiecesOf(player, puppet, arms, reason, armsOut ? n"previewOut" : n"preview", styleItem);
     if dump {
@@ -2747,6 +3163,8 @@ public class ArmSwapperInventoryStyleCallback extends DelayCallback {
         let player: ref<PlayerPuppet> = this.player;
         let puppet: ref<gamePuppet> = this.puppet;
         if !IsDefined(player) || !IsDefined(puppet) { return; }
+        ArmSwapperHideStrayLauncher(player, puppet);
+        ArmSwapperGorillaNails(player, puppet);
         let holstered: ref<ItemObject> = GameInstance.GetTransactionSystem(player.GetGame()).GetItemInSlot(puppet, t"AttachmentSlots.RightArm");
         if !IsDefined(holstered) { return; }
         let arms: ItemID = ArmSwapperArmsForHolstered(player, holstered.GetItemID());
@@ -2760,6 +3178,9 @@ public class ArmSwapperInventoryStyleCallback extends DelayCallback {
 
 public func ArmSwapperStyleInventorySoon(player: ref<PlayerPuppet>, puppet: ref<gamePuppet>) {
     if !IsDefined(player) || !IsDefined(puppet) || !(new SimpleArmSwapperSettings()).stylePerArmType { return; }
+    // The inventory shows V's arms put away: with their own colours, even if the launcher was out
+    let system: ref<CyberwareCustomizationSystem> = GameInstance.GetScriptableSystemsContainer(player.GetGame()).Get(n"CyberwareCustomizationSystem") as CyberwareCustomizationSystem;
+    if IsDefined(system) { system.ArmSwapperLauncherColours(false); }
     let delays: array<Float> = [0.0, 0.1, 0.3, 0.6, 1.0, 2.0];
     for delay in delays {
         let callback: ref<ArmSwapperInventoryStyleCallback> = new ArmSwapperInventoryStyleCallback();

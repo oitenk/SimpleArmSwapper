@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.6.0
+
+NEW! Projectile Launch System styles beside melee arms. The launcher keeps a Glamdoc style and colours of its own, even with Mantis Blades, Monowire or Gorilla Arms equipped. Open its tab in the Glamdoc to preview, buy and apply launcher styles without switching your melee arms. When fired, it shows its style and colours. The game holds one colour set for all arm cyberware, so melee arms on screen share the launcher's colours while it is out, and get their own back when it is put away. Needs Codeware.
+
+NEW! Nail items worn in Equipment-EX's fingernail slots are hidden while V wears Gorilla Arms, drawn or put away, as the Gorilla Arms cover V's hands. They come back with any other arms. This can be turned off in Mod Settings.
+
+Mantis Blades with a Glamdoc style no longer show V's nail colour on their hands, in first person, photo mode, the inventory and the Glamdoc preview. As in the base game, only Mantis Blades without a style show it.
+
+Fixed V's put-away arms after firing the Projectile Launch System. They could come back as the arms in the first arm slot, without their style, instead of the arms used last.
+
 ## 2.5.0
 
 NEW! Controller swap button. With arms drawn, tap D-pad Left to swap to the next arms, like the 4 key on keyboard. Holding D-pad Left still opens the pocket radio. The button can be changed in Mod Settings. Needs Input Loader; without it, everything works as before.

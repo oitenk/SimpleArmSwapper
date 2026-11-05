@@ -2,7 +2,7 @@
 
 A Cyberpunk 2077 mod for swapping between multiple sets of arm cyberware on the fly, without visiting a Ripperdoc.
 
-Current version: **2.5.0**, for Cyberpunk 2077 2.5.
+Current version: **2.6.0**, for Cyberpunk 2077 2.5.
 
 ## Features
 
@@ -12,14 +12,16 @@ Current version: **2.5.0**, for Cyberpunk 2077 2.5.
 - **Arm memory.** Drawing your arms brings back the set you used last, not whatever is in the first slot. This carries across saves.
 - **Gorilla Arms function like vanilla.** They take the place of bare fists, so the wheel offers Gorilla Arms rather than a separate fists entry while they are installed.
 - **Third-person arms.** While your arms are put away, and while you fight with bare fists, the inventory, vehicles and mirrors show the arm cyberware you used last.
-- **Glamdoc styles per arm type.** The Glamdoc can style every melee arm cyberware type you have equipped, in one visit. Each type keeps its own style and colours, saved with your game, and switching arms puts the matching style back.
+- **Glamdoc styles per arm type.** The Glamdoc can style every arm cyberware type you have equipped, in one visit. Each type keeps its own style and colours, saved with your game, and switching arms puts the matching style back.
 - **Styles on every arm slot.** Mantis Blades and Monowire wear their style in any arm slot: in hand, put away, in photo mode, on the inventory screen and in the Glamdoc preview. This includes the MaxTac Mantis Blades and arms built on them. Needs Codeware.
+- **Projectile Launch System styles beside melee arms.** The launcher keeps its own Glamdoc style and colours next to Mantis Blades, Monowire or Gorilla Arms, and shows them when fired. Needs Codeware.
+- **Nail items under Gorilla Arms.** Nails worn in Equipment-EX's fingernail slots are hidden while V wears Gorilla Arms, which cover V's hands, and come back with other arms.
 
 ## Styling several arm types in the Glamdoc
 
 1. Open the Glamdoc. It opens on the arms you used last.
 2. Pick a style and colours, then press **F** to buy and apply it. With more than one melee arm type equipped, the menu stays open.
-3. Use the arm type tabs at the top (Mantis Blades, Monowire, Gorilla Arms) to switch to your other arms. V switches to those arms, and the preview follows.
+3. Use the arm type tabs at the top (Mantis Blades, Monowire, Gorilla Arms) to switch to your other arms. V switches to those arms, and the preview follows. The Projectile Launch System tab styles the launcher while V keeps her melee arms; the preview shows the launcher.
 4. Style those too, then press **F** again to apply and close.
 
 Buying a style or switching arm type locks in what you have done so far, so leaving with Back only undoes changes made after that.
@@ -28,7 +30,7 @@ Buying a style or switching arm type locks in what you have done so far, so leav
 
 - **If an arm looks off,** for example right after removing a style or changing cyberware at a ripperdoc, save and reload once. That clears most visual hiccups. If it doesn't, please report it with a screenshot (and a log with Debug Logging on, if you can).
 - **Painted nails.** Most Mantis Blade and Monowire styles paint V's fingernails, which replaces V's own nails as in the base game. The painted nails can be missing on Mantis Blades outside the first arm slot. If you plan to remove arm cyberware that has such a style, remove its Glamdoc style first: otherwise the nail choice in the character editor can stay locked after the arms are gone. If that has already happened, installing the same arms again, removing their style in the Glamdoc and then removing the arms should free the nail choice.
-- **Projectile Launch System styles.** The launcher still works alongside multiple cyberarms, and fires as normal next to any of them. Its Glamdoc styles do not work while melee arms are also equipped: it shows its default look when fired, then V's arms go back to their own style. This is because the game holds one cyberarm style at a time. A Projectile Launch System on its own can be styled as in the base game.
+- **Launcher colours.** The game holds one colour set for all arm cyberware. While the Projectile Launch System is out, melee arms on screen share its colours; they get their own back when it is put away.
 
 ## Mod Settings options
 
@@ -37,6 +39,7 @@ With [Mod Settings](https://github.com/jackhumbert/mod_settings) installed, thes
 - **Weapon Wheel Shows Next Arms** (on by default): while arms are drawn, the wheel's cyberware slot starts on the next arms in line, so selecting it swaps right away. Off: it starts on the arms you are holding.
 - **Show Last Used Arms When Holstered** (on by default): third-person views show your last used arms while they are put away. Off: the game and your other mods decide.
 - **Glamdoc Style Per Arm Type** (on by default): the Glamdoc styles each arm type separately and switching arms puts the matching style back. Off: styling works as in the base game.
+- **Hide Nail Items Under Gorilla Arms** (on by default): nail items in Equipment-EX's fingernail slots are hidden while V wears Gorilla Arms. Off: they always show.
 - **Controller Swap Button** (D-pad Left by default): the controller button that swaps arms when tapped. Needs Input Loader.
 - **Debug Logging** (off by default, under Troubleshooting): writes what the mod does with arms and styles to the Cyber Engine Tweaks game log. Leave it off unless asked for a log.
 
@@ -50,9 +53,10 @@ Empty arm slots are skipped, and arm cyberware that is not a melee weapon (such 
 
 Optional:
 
-- [Codeware](https://github.com/psiberx/cp2077-codeware) - shows Glamdoc styles on Mantis Blades and Monowire outside the first arm slot, and lets the mod's text be translated. Without it those arms show their plain look.
+- [Codeware](https://github.com/psiberx/cp2077-codeware) - shows Glamdoc styles on Mantis Blades and Monowire outside the first arm slot and on the Projectile Launch System beside melee arms, and lets the mod's text be translated. Without it those arms show their plain look.
 - [Mod Settings](https://github.com/jackhumbert/mod_settings) - adds the options above to the in-game Mod Settings menu. Without it the defaults apply.
 - [Input Loader](https://github.com/jackhumbert/cyberpunk2077-input-loader) - adds the controller swap button. Without it, swapping works with the 4 key and the weapon wheel as before.
+- [Equipment-EX](https://github.com/psiberx/cp2077-equipment-ex) - only if you wear nail items in its fingernail slots; the mod hides them under Gorilla Arms. Nothing changes without it.
 
 With only one arm cyberware equipped, the game behaves exactly as it does without the mod.
 
