@@ -6,8 +6,6 @@ NEW! Projectile Launch System styles beside melee arms. The launcher keeps a Gla
 
 NEW! Nail items worn in Equipment-EX's fingernail slots are hidden while V wears Gorilla Arms, drawn or put away, as the Gorilla Arms cover V's hands. They come back with any other arms. This can be turned off in Mod Settings.
 
-Mantis Blades with a Glamdoc style no longer show V's nail colour on their hands, in first person, photo mode, the inventory and the Glamdoc preview. As in the base game, only Mantis Blades without a style show it.
-
 Fixed V's put-away arms after firing the Projectile Launch System. They could come back as the arms in the first arm slot, without their style, instead of the arms used last.
 
 ## 2.5.0
