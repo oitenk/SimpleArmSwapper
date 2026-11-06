@@ -1,5 +1,5 @@
 // r6/scripts/simple_arm_swapper/SimpleArmSwapper.reds
-// Simple Arm Swapper v2.6.1
+// Simple Arm Swapper v2.7.0
 
 // Other mods can detect this one with @if(ModuleExists("SimpleArmSwapperMod"))
 module SimpleArmSwapperMod
@@ -7,7 +7,7 @@ module SimpleArmSwapperMod
 @if(ModuleExists("Codeware.Localization"))
 import Codeware.Localization.*
 
-public func Version() -> String = "2.6.1"
+public func Version() -> String = "2.7.0"
 
 // Options shown in the Mod Settings menu. Mod Settings is optional: when it is installed it
 // writes the saved choice into this class's default values (at startup and whenever the

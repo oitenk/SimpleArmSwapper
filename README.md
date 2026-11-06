@@ -2,10 +2,11 @@
 
 A Cyberpunk 2077 mod for swapping between multiple sets of arm cyberware on the fly, without visiting a Ripperdoc.
 
-Current version: **2.6.1**, for Cyberpunk 2077 2.5.
+Current version: **2.7.0**, for Cyberpunk 2077 2.5.
 
 ## Features
 
+- **Four arm cyberware slots.** With TweakXL installed, V gets four arm cyberware slots, one for each arm type, free from the start. Install arms in them at any ripperdoc. If Cyberware-EX is installed, it manages the arm slots instead.
 - **Swap with the "4" key.** With arms drawn, press 4 to step to the next set of equipped arm cyberware.
 - **Swap with the weapon wheel.** The wheel's cyberware slot cycles through every equipped arm cyberware and bare fists, in both directions, using the wheel's previous/next keys. Select the slot to draw what it shows.
 - **Swap with a controller button.** With arms drawn, tap D-pad Left to step to the next set of arm cyberware. Holding D-pad Left still opens the pocket radio. The button can be changed in Mod Settings. Needs Input Loader.
@@ -30,6 +31,7 @@ Buying a style or switching arm type locks in what you have done so far, so leav
 
 - **If an arm looks off,** for example right after removing a style or changing cyberware at a ripperdoc, save and reload once. That clears most visual hiccups. If it doesn't, please report it with a screenshot (and a log with Debug Logging on, if you can).
 - **Painted nails.** Most Mantis Blade and Monowire styles paint V's fingernails, which replaces V's own nails as in the base game. The painted nails can be missing on Mantis Blades outside the first arm slot. If you plan to remove arm cyberware that has such a style, remove its Glamdoc style first: otherwise the nail choice in the character editor can stay locked after the arms are gone. If that has already happened, installing the same arms again, removing their style in the Glamdoc and then removing the arms should free the nail choice.
+- **Removing the mod or adding Cyberware-EX later.** Remove arms from the second, third and fourth arm slots at a ripperdoc first. Without the extra slots, cyberware left in them can go missing from V's equipment.
 - **Launcher colours.** The game holds one colour set for all arm cyberware. While the Projectile Launch System is out, melee arms on screen share its colours; they get their own back when it is put away.
 
 ## Mod Settings options
@@ -47,9 +49,10 @@ Empty arm slots are skipped, and arm cyberware that is not a melee weapon (such 
 
 ## Requirements
 
-- [Cyberware-EX](https://github.com/psiberx/cp2077-cyberware-ex)
-- Any mod that adds more arm cyberware slots. Cyberware-EX does not add arm slots on its own, and you need at least two. This includes Cyberware-EX slot configurations that unlock an extra arm slot: Simple Arm Swapper works as the arm swapper for those.
-- [redscript](https://github.com/jac3km4/redscript) and [RED4ext](https://github.com/WopsS/RED4ext), which the mods above already need
+- [redscript](https://github.com/jac3km4/redscript) and [RED4ext](https://github.com/WopsS/RED4ext)
+- [TweakXL](https://github.com/psiberx/cp2077-tweak-xl) - adds the extra arm slots. Without it you need another mod that adds arm slots.
+
+Cyberware-EX is no longer needed. If you use it, Simple Arm Swapper adds no slots of its own and leaves the arm slots to Cyberware-EX: you then need a Cyberware-EX mode or slot configuration with at least two arm slots, as before. Arm slots added by other mods count towards the four, so slots are never added twice.
 
 Optional:
 
@@ -66,6 +69,7 @@ Install the release zip with a mod manager such as Vortex, or copy its `r6` fold
 
 ```
 Cyberpunk 2077/r6/scripts/simple_arm_swapper/SimpleArmSwapper.reds
+Cyberpunk 2077/r6/scripts/simple_arm_swapper/SimpleArmSwapperArmSlots.reds
 Cyberpunk 2077/r6/scripts/simple_arm_swapper/SimpleArmSwapperStyleData.reds
 Cyberpunk 2077/r6/input/SimpleArmSwapper.xml
 ```
