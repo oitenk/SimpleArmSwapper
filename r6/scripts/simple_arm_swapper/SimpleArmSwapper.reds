@@ -1,5 +1,5 @@
 // r6/scripts/simple_arm_swapper/SimpleArmSwapper.reds
-// Simple Arm Swapper v2.6.0
+// Simple Arm Swapper v2.6.1
 
 // Other mods can detect this one with @if(ModuleExists("SimpleArmSwapperMod"))
 module SimpleArmSwapperMod
@@ -7,7 +7,7 @@ module SimpleArmSwapperMod
 @if(ModuleExists("Codeware.Localization"))
 import Codeware.Localization.*
 
-public func Version() -> String = "2.6.0"
+public func Version() -> String = "2.6.1"
 
 // Options shown in the Mod Settings menu. Mod Settings is optional: when it is installed it
 // writes the saved choice into this class's default values (at startup and whenever the
@@ -855,6 +855,42 @@ public class SimpleArmSwapperStyleMemory extends ScriptableSystem {
             if c == comp { return true; }
         }
         return false;
+    }
+
+    // Chunks of a piece that this mod hid for a style. Only those come back for another style: chunks
+    // hidden by something else (an item's hiding tag, such as KiasuBurger's cosmetic arms or
+    // luvwich's nails) stay hidden.
+    private let m_maskComps: array<wref<IComponent>>;
+    private let m_maskCleared: array<Uint64>;
+
+    public func ArmSwapperClearedChunks(comp: ref<IComponent>) -> Uint64 {
+        let i: Int32 = 0;
+        while i < ArraySize(this.m_maskComps) {
+            if this.m_maskComps[i] == comp { return this.m_maskCleared[i]; }
+            i += 1;
+        }
+        return 0ul;
+    }
+
+    public func ArmSwapperNoteMask(comp: ref<IComponent>, oldMask: Uint64, newMask: Uint64) {
+        let cleared: Uint64 = (this.ArmSwapperClearedChunks(comp) | (oldMask & ~newMask)) & ~newMask;
+        let comps: array<wref<IComponent>>;
+        let masks: array<Uint64>;
+        let i: Int32 = 0;
+        while i < ArraySize(this.m_maskComps) {
+            let c: ref<IComponent> = this.m_maskComps[i];
+            if IsDefined(c) && c != comp {
+                ArrayPush(comps, c);
+                ArrayPush(masks, this.m_maskCleared[i]);
+            }
+            i += 1;
+        }
+        if NotEquals(cleared, 0ul) {
+            ArrayPush(comps, comp);
+            ArrayPush(masks, cleared);
+        }
+        this.m_maskComps = comps;
+        this.m_maskCleared = masks;
     }
 
     public func ArmSwapperForgetHidForStyle(comp: ref<IComponent>) {
@@ -2171,6 +2207,15 @@ public func ArmSwapperStylePiecesOf(player: ref<PlayerPuppet>, owner: ref<Entity
                         && !StrContains(ResRef.ToString(piece.mesh), "\\pimp_chrome\\barghest\\") {
                         pieceShown = false;
                     }
+                    // Female V's styles hide the holstered upper arms outside first person and show
+                    // photo mode upper arms in their place. Arm pieces from other mods (Split Cyberarm
+                    // Styles' pairs) may bring no such pieces: then the upper arms stay.
+                    if pieceShown && (piece.hide || Equals(piece.mask, 0ul)) && !Equals(view, n"hfpp")
+                        && StrContains(NameToString(comp.GetName()), "holstered_upperarm")
+                        && !ArmSwapperHasPhotoUpperArm(comps, StrContains(NameToString(comp.GetName()), "_left")) {
+                        pieceShown = false;
+                        ArmSwapperLog(game, "  piece " + NameToString(piece.comp) + " kept: no photo mode upper arm to replace it");
+                    }
                     if pieceShown {
                         found += 1;
                         if piece.hide {
@@ -2179,6 +2224,7 @@ public func ArmSwapperStylePiecesOf(player: ref<PlayerPuppet>, owner: ref<Entity
                                 ArmSwapperSetPieceMask(comp, 0ul);
                                 comp.RefreshAppearance();
                                 memory.ArmSwapperRememberHidForStyle(comp);
+                                memory.ArmSwapperNoteMask(comp, mask, 0ul);
                                 changed += 1;
                                 ArmSwapperLog(game, "  piece " + NameToString(piece.comp) + " hidden");
                             }
@@ -2208,19 +2254,33 @@ public func ArmSwapperStylePiecesOf(player: ref<PlayerPuppet>, owner: ref<Entity
                             }
                             // The game's own masks may set the top bit where the data does not;
                             // that bit makes no difference, so it is not a change
-                            let maskChanged: Bool = NotEquals(mask | 9223372036854775808ul, piece.mask | 9223372036854775808ul);
+                            // Only chunks shown now, or hidden by this mod for a style, may show. Chunks
+                            // hidden by an item's hiding tag (KiasuBurger's cosmetic arms, luvwich's nails)
+                            // stay hidden.
+                            let allowed: Uint64 = mask | memory.ArmSwapperClearedChunks(comp);
+                            if Equals(allowed, 0ul) && memory.ArmSwapperHidForStyle(comp) { allowed = 18446744073709551615ul; }
+                            let wantMask: Uint64 = piece.mask & allowed;
+                            let maskChanged: Bool = NotEquals(mask | 9223372036854775808ul, wantMask | 9223372036854775808ul);
                             if maskChanged {
-                                ArmSwapperSetPieceMask(comp, piece.mask);
+                                ArmSwapperSetPieceMask(comp, wantMask);
+                                memory.ArmSwapperNoteMask(comp, mask, wantMask);
                                 if Equals(mask, 0ul) { memory.ArmSwapperForgetHidForStyle(comp); }
                                 changed += 1;
-                                ArmSwapperLog(game, "  piece " + NameToString(piece.comp) + " chunk mask " + s"\(mask) -> \(piece.mask)");
+                                ArmSwapperLog(game, "  piece " + NameToString(piece.comp) + " chunk mask " + s"\(mask) -> \(wantMask)");
+                            }
+                            if NotEquals(piece.mask & ~allowed & 9223372036854775807ul, 0ul) {
+                                ArmSwapperLog(game, "  piece " + NameToString(piece.comp) + " keeps chunks hidden by another mod: " + s"\(piece.mask & ~allowed)");
                             }
                             if NotEquals(mesh, piece.mesh) {
                                 comp.ChangeResource(piece.mesh, true);
                                 changed += 1;
                                 ArmSwapperLog(game, "  piece " + NameToString(piece.comp) + " mesh " + ResRef.ToString(mesh) + " -> " + ResRef.ToString(piece.mesh));
                             }
-                            if NotEquals(look, wantLook) {
+                            // Other mods add variants of a mesh's looks named "<look>__<variant>" (Night City
+                            // Glamdoc Colors' finishes): on the same mesh such a variant counts as the look
+                            let sameLook: Bool = Equals(look, wantLook)
+                                || (Equals(mesh, piece.mesh) && StrBeginsWith(NameToString(look), NameToString(wantLook) + "__"));
+                            if !sameLook {
                                 comp.ChangeAppearance(wantLook, true);
                                 changed += 1;
                                 ArmSwapperLog(game, "  piece " + NameToString(piece.comp) + " look " + NameToString(look) + " -> " + NameToString(wantLook));
@@ -2262,6 +2322,20 @@ public func ArmSwapperStylePiecesOf(player: ref<PlayerPuppet>, owner: ref<Entity
         ArmSwapperCheckHead(player, "after styling, " + reason);
     }
     return changed;
+}
+
+// Whether a character shows a photo mode upper arm on one side
+@if(ModuleExists("Codeware"))
+public func ArmSwapperHasPhotoUpperArm(comps: array<ref<IComponent>>, left: Bool) -> Bool {
+    let side: String = left ? "_left" : "_right";
+    for comp in comps {
+        let mask: Uint64;
+        if IsDefined(comp) && ArmSwapperPieceMask(comp, mask) && NotEquals(mask, 0ul) {
+            let name: String = NameToString(comp.GetName());
+            if StrContains(name, "photomode_upperarm") && StrContains(name, side) { return true; }
+        }
+    }
+    return false;
 }
 
 @if(ModuleExists("Codeware"))
@@ -2734,6 +2808,21 @@ public func ArmSwapperWearsGorillaArms(player: ref<PlayerPuppet>, owner: ref<Gam
 // Takes the items out of Equipment-EX's fingernail slots while V wears Gorilla Arms, and puts them
 // back afterwards. Only what is shown changes: Equipment-EX keeps the items in its outfit and puts
 // them back by itself (after a load, for one), when this is simply done again.
+// Only nail items come off. The fingernail slots also hold whole cosmetic arms and hands
+// (KiasuBurger's, for one), made to cover arm cyberware; taking those off showed the cyberware.
+public func ArmSwapperIsNailItem(item: ref<ItemObject>) -> Bool {
+    if !IsDefined(item) { return false; }
+    if StrBeginsWith(TDBID.ToStringDEBUG(ItemID.GetTDBID(item.GetItemID())), "Items.kiasu_burger") { return false; }
+    let armTags: array<CName> = [n"hide_arm_left", n"hide_arm_right", n"hide_nails_left", n"hide_nails_right",
+        n"hide_nails_keep_link_left", n"hide_base_hand_left", n"hide_base_hand_right", n"hide_base_arm_left",
+        n"hide_base_arm_right", n"hide_cyber_hand_wrist_left", n"hide_cyber_hand_wrist_right",
+        n"hide_cyber_arm_hand_left", n"hide_cyber_arm_hand_right"];
+    for tag in armTags {
+        if item.MatchVisualTag(tag) { return false; }
+    }
+    return true;
+}
+
 public func ArmSwapperGorillaNails(player: ref<PlayerPuppet>, owner: ref<GameObject>) {
     if !IsDefined(player) || !IsDefined(owner) { return; }
     let memory: ref<SimpleArmSwapperStyleMemory> = SimpleArmSwapperStyleMemory.Get(player.GetGame());
@@ -2759,7 +2848,10 @@ public func ArmSwapperGorillaNails(player: ref<PlayerPuppet>, owner: ref<GameObj
     let slots: array<TweakDBID> = [t"OutfitSlots.FingernailsLeft", t"OutfitSlots.FingernailsRight"];
     for slot in slots {
         let nails: ref<ItemObject> = ts.GetItemInSlot(owner, slot);
-        if IsDefined(nails) {
+        if IsDefined(nails) && !ArmSwapperIsNailItem(nails) {
+            ArmSwapperLog(player.GetGame(), "item " + ArmSwapperName(nails.GetItemID()) + " in " + TDBID.ToStringDEBUG(slot) + " is a cosmetic arm or hand, left on under Gorilla Arms");
+        }
+        if IsDefined(nails) && ArmSwapperIsNailItem(nails) {
             let nailItem: ItemID = nails.GetItemID();
             ts.RemoveItemFromSlot(owner, slot);
             if owner == player {

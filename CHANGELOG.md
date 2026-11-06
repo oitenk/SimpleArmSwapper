@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.6.1
+
+Fixed cosmetic arms and hands (such as KiasuBurger's) coming off under Gorilla Arms. They share Equipment-EX's fingernail slots with nail items; now only nail items are hidden under Gorilla Arms.
+
+Fixed Mantis Blades and Monowire showing through cosmetic arms (such as KiasuBurger's), drawn and put away. Arm parts that another mod's item hides now stay hidden when Simple Arm Swapper applies a style. This also keeps nail items from mods like luvwich's manicures looking right on the Monowire.
+
+Fixed female V's upper arms going missing on the photo mode and inventory characters with Mantis Blades put away, when the arm pieces come from another mod (such as Split Cyberarm Styles). The upper arms are now only swapped out when the game provides its photo mode upper arms to take their place.
+
+Better compatibility with mods that add their own looks to arm cyberware meshes (such as Night City Glamdoc Colors). Simple Arm Swapper no longer changes those looks back to the plain style look, so their finishes stay on V's arms.
+
 ## 2.6.0
 
 NEW! Projectile Launch System styles beside melee arms. The launcher keeps a Glamdoc style and colours of its own, even with Mantis Blades, Monowire or Gorilla Arms equipped. Open its tab in the Glamdoc to preview, buy and apply launcher styles without switching your melee arms. When fired, it shows its style and colours. The game holds one colour set for all arm cyberware, so melee arms on screen share the launcher's colours while it is out, and get their own back when it is put away. Needs Codeware.

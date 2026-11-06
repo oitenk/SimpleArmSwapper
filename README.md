@@ -2,7 +2,7 @@
 
 A Cyberpunk 2077 mod for swapping between multiple sets of arm cyberware on the fly, without visiting a Ripperdoc.
 
-Current version: **2.6.0**, for Cyberpunk 2077 2.5.
+Current version: **2.6.1**, for Cyberpunk 2077 2.5.
 
 ## Features
 
