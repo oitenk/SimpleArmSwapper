@@ -2,19 +2,19 @@
 
 ## 2.7.1
 
-Fixed a crash when swapping arms quickly with the swap key or controller button. Each arm type's Glamdoc style is now set once (when a save loads, when the Glamdoc closes, and after a ripperdoc), and swapping arms only changes the colours, so swaps are lighter too.
+Hopefully fixed the game crashing when you swap arms quickly. Thank you to everyone who reported it and sent logs, they made this possible. The cause: every time you swapped, the mod asked the game to change your arm style while your arms were still coming out, and pressing fast stacked those requests until the game tripped over them. Now each arm type's style is set once, when a save loads, when you leave the Glamdoc, and after a ripperdoc visit, and a swap only changes the colours. Swaps are lighter as a result too.
 
-Fixed a crash when switching arm tabs quickly in the Glamdoc. A tab now waits until the previous tab's preview has appeared, then shows the last tab picked.
+Hopefully fixed a crash when flipping through arm tabs quickly in the Glamdoc. Same reason as above: each tab rebuilds the preview character, and new tabs were arriving before the last preview was ready. A tab now waits for the previous preview, then shows the last tab you picked, so you can click as fast as you like.
 
-Swap presses that come before the last swap's arms are in hand are now ignored, so fast presses can no longer pile up.
+Swap presses now wait until your arms are fully out before the next swap goes through. You won't notice it at normal speed. It just stops a burst of presses from piling up.
 
-Better compatibility with mods that recolour the Monowire's wires (such as qtuna's Monowire palette). Their wire colours now stay on when a Glamdoc style is applied.
+Mods that recolour the Monowire's wires (such as qtuna's Monowire palette) now keep their colours when a Glamdoc style is applied. Before, the style swapped their wires back to its own.
 
-With a manicure that hides part of the Monowire's arms (such as luvwich's manicures), a Monowire outside the first arm slot now keeps its plain arm shape, with its style's colours and wires. Its full style shows when it sits in the first arm slot, or without the manicure. Taking the manicure off brings the style back.
+Manicures and the Monowire: some manicure items (such as luvwich's) hide a small part of the Monowire's arms to make room for their nails. On the plain Monowire that part is the fingernails, but on many Monowire styles it's part of the arm itself. With both the manicure and the style changing the same arm parts at once, the game could crash. So when you wear one of those manicures, a Monowire outside the first arm slot keeps its plain arm shape, with its style's colours and wires. In the first arm slot, the game styles the Monowire itself, so it shows its style there. Take the manicure off and the style comes back. I know people love their nails, and I'd rather give you a slightly plainer Monowire than a crash. I'm still looking for a way to have both.
 
 Arm pieces are now restyled with fewer reloads, which also makes swapping lighter.
 
-Debug Logging now keeps up to 20000 lines per session.
+Debug Logging now keeps up to 20000 lines per session, so a log covers a whole play session if you send me one.
 
 ## 2.7.0
 
