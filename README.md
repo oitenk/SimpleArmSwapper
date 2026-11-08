@@ -2,7 +2,7 @@
 
 A Cyberpunk 2077 mod for swapping between multiple sets of arm cyberware on the fly, without visiting a Ripperdoc.
 
-Current version: **2.7.0**, for Cyberpunk 2077 2.5.
+Current version: **2.7.1**, for Cyberpunk 2077 2.5.
 
 ## Features
 
@@ -32,6 +32,7 @@ Buying a style or switching arm type locks in what you have done so far, so leav
 - **If an arm looks off,** for example right after removing a style or changing cyberware at a ripperdoc, save and reload once. That clears most visual hiccups. If it doesn't, please report it with a screenshot (and a log with Debug Logging on, if you can).
 - **Painted nails.** Most Mantis Blade and Monowire styles paint V's fingernails, which replaces V's own nails as in the base game. The painted nails can be missing on Mantis Blades outside the first arm slot. If you plan to remove arm cyberware that has such a style, remove its Glamdoc style first: otherwise the nail choice in the character editor can stay locked after the arms are gone. If that has already happened, installing the same arms again, removing their style in the Glamdoc and then removing the arms should free the nail choice.
 - **Removing the mod or adding Cyberware-EX later.** Remove arms from the second, third and fourth arm slots at a ripperdoc first. Without the extra slots, cyberware left in them can go missing from V's equipment.
+- **Manicures and the Monowire.** Some manicure items (such as luvwich's) hide part of the Monowire's arms to make room for their nails. With one of those on, a Monowire outside the first arm slot keeps its plain arm shape, with its style's colours and wires. Put the Monowire in the first arm slot, or take the manicure off, for its full style.
 - **Launcher colours.** The game holds one colour set for all arm cyberware. While the Projectile Launch System is out, melee arms on screen share its colours; they get their own back when it is put away.
 
 ## Mod Settings options

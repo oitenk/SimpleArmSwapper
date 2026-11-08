@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.7.1
+
+Fixed a crash when swapping arms quickly with the swap key or controller button. Each arm type's Glamdoc style is now set once (when a save loads, when the Glamdoc closes, and after a ripperdoc), and swapping arms only changes the colours, so swaps are lighter too.
+
+Fixed a crash when switching arm tabs quickly in the Glamdoc. A tab now waits until the previous tab's preview has appeared, then shows the last tab picked.
+
+Swap presses that come before the last swap's arms are in hand are now ignored, so fast presses can no longer pile up.
+
+Better compatibility with mods that recolour the Monowire's wires (such as qtuna's Monowire palette). Their wire colours now stay on when a Glamdoc style is applied.
+
+With a manicure that hides part of the Monowire's arms (such as luvwich's manicures), a Monowire outside the first arm slot now keeps its plain arm shape, with its style's colours and wires. Its full style shows when it sits in the first arm slot, or without the manicure. Taking the manicure off brings the style back.
+
+Arm pieces are now restyled with fewer reloads, which also makes swapping lighter.
+
+Debug Logging now keeps up to 20000 lines per session.
+
 ## 2.7.0
 
 NEW! Four arm cyberware slots without Cyberware-EX. With TweakXL installed, V gets four arm slots, one for each arm type, free from the start, in new and existing saves. Install arms in them at any ripperdoc. Cyberware-EX is no longer needed; if it is installed, it keeps managing the arm slots as before.

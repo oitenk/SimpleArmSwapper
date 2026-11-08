@@ -1,5 +1,5 @@
 // r6/scripts/simple_arm_swapper/SimpleArmSwapper.reds
-// Simple Arm Swapper v2.7.0
+// Simple Arm Swapper v2.7.1
 
 // Other mods can detect this one with @if(ModuleExists("SimpleArmSwapperMod"))
 module SimpleArmSwapperMod
@@ -7,7 +7,7 @@ module SimpleArmSwapperMod
 @if(ModuleExists("Codeware.Localization"))
 import Codeware.Localization.*
 
-public func Version() -> String = "2.7.0"
+public func Version() -> String = "2.7.1"
 
 // Options shown in the Mod Settings menu. Mod Settings is optional: when it is installed it
 // writes the saved choice into this class's default values (at startup and whenever the
@@ -44,7 +44,7 @@ public class SimpleArmSwapperSettings {
     @runtimeProperty("ModSettings.mod", "Simple Arm Swapper")
     @runtimeProperty("ModSettings.category", "Troubleshooting")
     @runtimeProperty("ModSettings.displayName", "Debug Logging")
-    @runtimeProperty("ModSettings.description", "Writes what the mod does with arms and Glamdoc styles to the Cyber Engine Tweaks game log (up to 5000 lines per session). Leave off unless asked for a log.")
+    @runtimeProperty("ModSettings.description", "Writes what the mod does with arms and Glamdoc styles to the Cyber Engine Tweaks game log (up to 20000 lines per session). Leave off unless asked for a log.")
     public let debugLogging: Bool = false;
 }
 
@@ -56,7 +56,7 @@ public let m_armSwapperLogLines: Int32;
 public func ArmSwapperLog(game: GameInstance, message: String) {
     if !(new SimpleArmSwapperSettings()).debugLogging { return; }
     let player: ref<PlayerPuppet> = GetPlayer(game);
-    if !IsDefined(player) || player.m_armSwapperLogLines >= 5000 { return; }
+    if !IsDefined(player) || player.m_armSwapperLogLines >= 20000 { return; }
     player.m_armSwapperLogLines += 1;
     FTLog("[SimpleArmSwapper] " + message);
 }
@@ -222,11 +222,40 @@ public class SimpleArmSwapper extends ScriptableSystem {
         let heldObject: ref<ItemObject> = ts.GetItemInSlot(player, t"AttachmentSlots.WeaponRight");
         ArmSwapperLog(player.GetGame(), "4 key: " + IntToString(count) + " melee arms, held=" + (IsDefined(heldObject) ? ArmSwapperName(heldObject.GetItemID()) : "empty")
             + ", " + ArmSwapperArmSlotsText(player) + ". " + ArmSwapperArmsState(player));
-        if count <= 1 { return; }
+        if count < 1 { return; }
+
+        // A swap restyles the arms while they load in. Pressing again before they are in hand
+        // stacked those restyles and could freeze or crash the game, so wait for them
+        let now: Float = ArmSwapperNow(player.GetGame());
+        if player.m_armSwapperSwapSince > 0.0 && now - player.m_armSwapperSwapSince < 1.5 {
+            ArmSwapperLog(player.GetGame(), "4 key ignored: the last swap is still settling ("
+                + FloatToStringPrec(now - player.m_armSwapperSwapSince, 2) + "s)");
+            return;
+        }
+        // The arms are in hand, but their first styling passes are still running
+        if now < player.m_armSwapperSettledAt {
+            ArmSwapperLog(player.GetGame(), "4 key ignored: the last swap's arms are still being styled");
+            return;
+        }
 
         // Only cycle while arms are already out. Otherwise the game draws the
         // remembered arms on its own (see the GetActiveMeleeWare wrap below)
-        if !IsDefined(heldObject) || !ArrayContains(meleewareItems, heldObject.GetItemID()) { return; }
+        let holdingArms: Bool = IsDefined(heldObject) && ArrayContains(meleewareItems, heldObject.GetItemID());
+        if !holdingArms {
+            // The game draws the arms from this press: wait for them too
+            player.m_armSwapperSwapSince = now;
+            player.m_armSwapperSwapGen += 1;
+            return;
+        }
+        if count <= 1 { return; }
+
+        // Without an active weapon the game is still busy with the last draw. Swapping then only
+        // changed the active arms without drawing them, and let the next press through at once.
+        let activeWeapon: ItemID = eqData.GetSlotActiveWeapon();
+        if !ItemID.IsValid(activeWeapon) {
+            ArmSwapperLog(player.GetGame(), "4 key ignored: the game is still drawing the arms");
+            return;
+        }
 
         // Fetch currently active arm item
         let currentActiveID: ItemID = eqData.GetActiveItem(gamedataEquipmentArea.ArmsCW);
@@ -256,11 +285,10 @@ public class SimpleArmSwapper extends ScriptableSystem {
         // (such as a quickhack on the Monowire).
         eqData.ArmSwapperMakeActiveArms(nextArmsID);
 
-        // Immediate visual draw update if arms are already active
-        let activeWeapon: ItemID = eqData.GetSlotActiveWeapon();
-        if ItemID.IsValid(activeWeapon) {
-            eqData.DrawItem(nextArmsID, gameEquipAnimationType.Default);
-        }
+        // Draw them, and take no further swap until they are in hand
+        player.m_armSwapperSwapSince = now;
+        player.m_armSwapperSwapGen += 1;
+        eqData.DrawItem(nextArmsID, gameEquipAnimationType.Default);
     }
 }
 
@@ -357,6 +385,15 @@ public static func ArmSwapperArmsInHand(player: ref<PlayerPuppet>, arms: ItemID)
     if ArmSwapperArmsType(arms) == 0 { return; }
     let record: ref<Item_Record> = TweakDBInterface.GetItemRecord(ItemID.GetTDBID(arms));
     if !IsDefined(record) || !record.TagsContains(n"Meleeware") { return; }
+    // A swap that was settling is done: the next swap press is taken again
+    // A swap that was settling has its arms in hand. The next swap waits for their first styling
+    // passes too (see ArmSwapperStylePiecesSoon: 0.05 and 0.25 s after they attach).
+    if player.m_armSwapperSwapSince > 0.0 {
+        let settledNow: Float = ArmSwapperNow(player.GetGame());
+        ArmSwapperLog(player.GetGame(), "swap arms in hand after " + FloatToStringPrec(settledNow - player.m_armSwapperSwapSince, 2) + "s");
+        player.m_armSwapperSwapSince = 0.0;
+        player.m_armSwapperSettledAt = settledNow + 0.3;
+    }
     let eqData: ref<EquipmentSystemPlayerData> = EquipmentSystem.GetData(player);
     if !IsDefined(eqData) { return; }
     if !(eqData.GetActiveMeleeWare() == arms) {
@@ -872,6 +909,49 @@ public class SimpleArmSwapperStyleMemory extends ScriptableSystem {
         return 0ul;
     }
 
+    // Looks this mod asked arm pieces to switch to in the last moment. Some pieces keep reporting
+    // their old look after the switch (the Monowire whips), so every styling pass asked again and
+    // reloaded them all; with fast swaps that piled up on pieces being taken off and could crash.
+    private let m_askedComps: array<wref<IComponent>>;
+    private let m_askedLooks: array<CName>;
+    private let m_askedTimes: array<Float>;
+
+    // A nail item with a hiding tag on the Monowire arms was taken off for Gorilla Arms, and comes back
+    public let hiddenNailsHideMonowire: Bool;
+
+    public func ArmSwapperAskedLookLately(comp: ref<IComponent>, look: CName, now: Float) -> Bool {
+        let i: Int32 = 0;
+        while i < ArraySize(this.m_askedComps) {
+            if this.m_askedComps[i] == comp && Equals(this.m_askedLooks[i], look) && now - this.m_askedTimes[i] < 3.0 {
+                return true;
+            }
+            i += 1;
+        }
+        return false;
+    }
+
+    public func ArmSwapperNoteAskedLook(comp: ref<IComponent>, look: CName, now: Float) {
+        let comps: array<wref<IComponent>>;
+        let looks: array<CName>;
+        let times: array<Float>;
+        let i: Int32 = 0;
+        while i < ArraySize(this.m_askedComps) {
+            let c: ref<IComponent> = this.m_askedComps[i];
+            if IsDefined(c) && c != comp && now - this.m_askedTimes[i] < 3.0 {
+                ArrayPush(comps, c);
+                ArrayPush(looks, this.m_askedLooks[i]);
+                ArrayPush(times, this.m_askedTimes[i]);
+            }
+            i += 1;
+        }
+        ArrayPush(comps, comp);
+        ArrayPush(looks, look);
+        ArrayPush(times, now);
+        this.m_askedComps = comps;
+        this.m_askedLooks = looks;
+        this.m_askedTimes = times;
+    }
+
     public func ArmSwapperNoteMask(comp: ref<IComponent>, oldMask: Uint64, newMask: Uint64) {
         let cleared: Uint64 = (this.ArmSwapperClearedChunks(comp) | (oldMask & ~newMask)) & ~newMask;
         let comps: array<wref<IComponent>>;
@@ -957,10 +1037,16 @@ public func ArmSwapperRefreshMaxTacLook(styled: Bool) {
     let gameTest: Bool = this.ShouldApplyMaxTacApperance();
     ArmSwapperLog(this.GetGameInstance(), "MaxTac check for " + ArmSwapperName(active) + ": game test " + BoolToString(gameTest)
         + ", styled " + BoolToString(styled) + ", flag " + BoolToString(before) + ", tags " + ArmSwapperTagsText(active));
-    // Only Mantis Blades have a MaxTac look. For any other arms just clear the flag in the saved style
-    // data (their own style is applied next): calling the game's MaxTac functions now would apply
-    // the Mantis Blade pieces again while the other arms come out.
+    // Only Mantis Blades have a MaxTac look; calling the game's MaxTac functions for other arms would
+    // apply the Mantis Blade pieces again while those arms come out.
     if ArmSwapperArmsType(active) != 1 {
+        // Outside the Glamdoc no style switch goes out on a swap, so the flag stays as it is: the
+        // MaxTac look only touches the Mantis Blades' own pieces, and keeping it set means swapping
+        // back to the blades needs no MaxTac switch either. The Glamdoc's tabs do send style
+        // switches (through the MaxTac version while the flag is set), so there it is cleared;
+        // leaving the Glamdoc sets the MaxTac look again with the other switchers.
+        let tabsMemory: ref<SimpleArmSwapperStyleMemory> = SimpleArmSwapperStyleMemory.Get(this.GetGameInstance());
+        if !(IsDefined(tabsMemory) && tabsMemory.glamdocOpen) { return; }
         if before {
             this.savedData.hasMaxTacApperanceEquipped = false;
             ArmSwapperLog(this.GetGameInstance(), "MaxTac flag cleared for " + ArmSwapperName(active));
@@ -998,6 +1084,19 @@ public func ArmSwapperTagsText(item: ItemID) -> String {
 // When V attached (a save loading), in engine time
 @addField(PlayerPuppet)
 public let m_armSwapperAttachTime: Float;
+
+// When the last arm swap started, in engine time, until its arms are in hand (0 = none settling)
+@addField(PlayerPuppet)
+public let m_armSwapperSwapSince: Float;
+
+// Until when the last swap's arms are still being styled, in engine time
+@addField(PlayerPuppet)
+public let m_armSwapperSettledAt: Float;
+
+// Counts the swaps started with the swap key or button. Styling passes queued for V's arms
+// drop out once a newer swap has started, so they never work on arms on their way out.
+@addField(PlayerPuppet)
+public let m_armSwapperSwapGen: Int32;
 
 public func ArmSwapperNow(game: GameInstance) -> Float {
     return EngineTime.ToFloat(GameInstance.GetEngineTime(game));
@@ -1139,7 +1238,10 @@ public func ArmSwapperApplyStyleFor(armsItem: ItemID, opt fromGlamdoc: Bool) {
         this.savedData.brandDataID = TDBID.None();
         this.savedData.primaryColorIndex = Cast<Uint8>(0);
         this.savedData.secondaryColorIndex = Cast<Uint8>(0);
-        if NotEquals(ownSwitcher, n"None") && !this.ArmSwapperHoldsBackSwitcher(ownSwitcher) {
+        // Switchers are only set when the save loads and when the Glamdoc closes, never on a swap
+        // (see ArmSwapperSetAllSwitchers). Glamdoc tab switches still send theirs: the game only
+        // rebuilds the preview character for the new arms after a style switch.
+        if fromGlamdoc && NotEquals(ownSwitcher, n"None") && !this.ArmSwapperHoldsBackSwitcher(ownSwitcher) {
             this.SetIndexForCustomizationSwitcher(ownSwitcher, Cast<Uint32>(0), true);
             ArmSwapperCheckHeadSoon(player, "after style switcher reset");
         }
@@ -1180,6 +1282,16 @@ public func ArmSwapperApplyStyleFor(armsItem: ItemID, opt fromGlamdoc: Bool) {
     this.savedData.brandDataID = brandDataID;
     this.savedData.primaryColorIndex = primaryColor;
     this.savedData.secondaryColorIndex = secondaryColor;
+    if !fromGlamdoc {
+        // Every type's switcher was set once already (ArmSwapperSetAllSwitchers), so a swap only
+        // changes the colours. Sending the style switch on every swap, while the arms were still
+        // changing, could crash the game.
+        this.SetCustomizationParameters(this.savedData.enabled, Color.ToLinear(CyberwareCustomizationPersistentData.GetPrimaryColor(this.savedData)),
+            Color.ToLinear(CyberwareCustomizationPersistentData.GetSecondaryColor(this.savedData)));
+        EquipmentSystem.GetData(player).ArmSwapperSyncStyleItem(styleItem);
+        ArmSwapperLog(this.GetGameInstance(), "colours for " + ArmSwapperName(armsItem) + ": " + ArmSwapperStyleDataText(this.savedData));
+        return;
+    }
     this.RestoreCyberwareCustomization(true);
     ArmSwapperCheckHeadSoon(player, "after style restore for " + ArmSwapperName(armsItem));
     EquipmentSystem.GetData(player).ArmSwapperSyncStyleItem(styleItem);
@@ -1221,6 +1333,12 @@ private final func OnSaveAndApplyCyberwareCustomizationDataRequest(request: ref<
         }
     }
     this.ArmSwapperApplyStyleForActiveArms();
+    // A style change outside the Glamdoc (the game clears the style when cyberware changes at a
+    // ripperdoc): set every type's switcher again a moment later
+    let changeMemory: ref<SimpleArmSwapperStyleMemory> = SimpleArmSwapperStyleMemory.Get(this.GetGameInstance());
+    if IsDefined(changeMemory) && !changeMemory.glamdocOpen && (new SimpleArmSwapperSettings()).stylePerArmType {
+        this.ArmSwapperSetAllSwitchersLater("style changed outside the Glamdoc", 1.5);
+    }
 }
 
 @wrapMethod(CyberwareCustomizationSystem)
@@ -1244,6 +1362,100 @@ private final func PlayerAttachedCallback(playerPuppet: ref<GameObject>) {
     ArmSwapperStartHeadWatch(attached);
     this.ArmSwapperRememberCurrentStyle();
     this.ArmSwapperApplyStyleForActiveArms();
+    // Set every arm type's switcher once the save has finished loading (earlier, mid-load style
+    // changes brought V's hair into first person)
+    if IsDefined(attached) && (new SimpleArmSwapperSettings()).stylePerArmType {
+        this.ArmSwapperSetAllSwitchersLater("save loaded", 12.0);
+    }
+}
+
+// Sets every arm type's switcher after the given delay, once no swap is settling and the Glamdoc is closed
+@addMethod(CyberwareCustomizationSystem)
+public func ArmSwapperSetAllSwitchersLater(why: String, delay: Float) {
+    let player: ref<PlayerPuppet> = this.m_playerPuppet as PlayerPuppet;
+    if !IsDefined(player) { return; }
+    let later: ref<ArmSwapperSetSwitchersCallback> = new ArmSwapperSetSwitchersCallback();
+    later.system = this;
+    later.why = why;
+    GameInstance.GetDelaySystem(player.GetGame()).DelayCallback(later, delay, false);
+}
+
+public class ArmSwapperSetSwitchersCallback extends DelayCallback {
+    public let system: wref<CyberwareCustomizationSystem>;
+    public let why: String;
+
+    public func Call() -> Void {
+        let system: ref<CyberwareCustomizationSystem> = this.system;
+        if !IsDefined(system) { return; }
+        let player: ref<PlayerPuppet> = system.ArmSwapperPlayer();
+        // A swap still settling, or the Glamdoc open again: try a moment later
+        let memory: ref<SimpleArmSwapperStyleMemory> = IsDefined(player) ? SimpleArmSwapperStyleMemory.Get(player.GetGame()) : null;
+        if IsDefined(player) && (player.m_armSwapperSwapSince > 0.0 || (IsDefined(memory) && memory.glamdocOpen)) {
+            GameInstance.GetDelaySystem(player.GetGame()).DelayCallback(this, 1.0, false);
+            return;
+        }
+        system.ArmSwapperSetAllSwitchers(NotEquals(this.why, "") ? this.why : "save loaded");
+    }
+}
+
+// Each arm type has a style switcher of its own in V's character customization (mantis, monowire,
+// strongarms), so every equipped type's switcher is set to its remembered style once: when the save
+// loads, when the Glamdoc closes, and when the game changes the style (a ripperdoc). Swaps then only
+// change the colours. The type in use goes last.
+@addMethod(CyberwareCustomizationSystem)
+public func ArmSwapperSetAllSwitchers(why: String) {
+    let player: ref<PlayerPuppet> = this.m_playerPuppet as PlayerPuppet;
+    let memory: ref<SimpleArmSwapperStyleMemory> = SimpleArmSwapperStyleMemory.Get(this.GetGameInstance());
+    if !IsDefined(player) || !IsDefined(memory) { return; }
+    let eqData: ref<EquipmentSystemPlayerData> = EquipmentSystem.GetData(player);
+    if !IsDefined(eqData) { return; }
+    let activeType: Int32 = ArmSwapperArmsType(eqData.GetActiveMeleeWare());
+    // Melee arms only (1 to 3): the launcher's style is kept off V beside melee arms. The active
+    // type goes last, so its switcher is the one the game saw most recently.
+    let order: array<Int32>;
+    let t: Int32 = 1;
+    while t <= 3 {
+        if t != activeType { ArrayPush(order, t); }
+        t += 1;
+    }
+    if activeType >= 1 && activeType <= 3 { ArrayPush(order, activeType); }
+    for armsType in order {
+        if ItemID.IsValid(ArmSwapperEquippedArmsOfType(player, armsType)) {
+            let switcher: CName = memory.GetKnownSwitcherName(armsType);
+            let index: Int32 = 0;
+            if memory.HasStyle(armsType) && memory.IsEnabled(armsType) && ItemID.IsValid(memory.GetStyleItem(armsType)) {
+                let record: ref<UIGlamdocCustomizationItem_Record> = TweakDBInterface.GetUIGlamdocCustomizationItemRecord(ItemID.GetTDBID(memory.GetStyleItem(armsType)));
+                if IsDefined(record) {
+                    index = record.CustomizationIndex();
+                    if record.LongSleevesCustomizationIndex() != -1 && EquipmentSystemPlayerData.HasLongSleeves(player) {
+                        index = record.LongSleevesCustomizationIndex();
+                    }
+                }
+                if NotEquals(memory.GetSwitcherName(armsType), n"None") { switcher = memory.GetSwitcherName(armsType); }
+            }
+            // MaxTac-based Mantis Blades without a style wear the MaxTac look, through the game's own
+            // MaxTac version of the switch
+            let maxTac: Bool = false;
+            if armsType == 1 && index == 0 {
+                let bladeRecord: ref<Item_Record> = TweakDBInterface.GetItemRecord(ItemID.GetTDBID(ArmSwapperEquippedArmsOfType(player, 1)));
+                maxTac = IsDefined(bladeRecord) && bladeRecord.TagsContains(n"SetMaxTacApperance");
+            }
+            if NotEquals(switcher, n"None") {
+                if maxTac {
+                    if !this.savedData.hasMaxTacApperanceEquipped { this.SetMaxTacApperance(); }
+                    this.SetIndexForCustomizationSwitcherWithMaxTacAppearance(switcher, Cast<Uint32>(index), true);
+                } else {
+                    if armsType == 1 && this.savedData.hasMaxTacApperanceEquipped { this.RemoveMaxTacApperance(); }
+                    this.SetIndexForCustomizationSwitcher(switcher, Cast<Uint32>(index), true);
+                }
+                ArmSwapperLog(this.GetGameInstance(), "switchers (" + why + "): " + NameToString(switcher) + " set to " + IntToString(index)
+                    + (maxTac ? " with the MaxTac look" : ""));
+            }
+        }
+    }
+    // The arms in use keep their colours
+    this.SetCustomizationParameters(this.savedData.enabled, Color.ToLinear(CyberwareCustomizationPersistentData.GetPrimaryColor(this.savedData)),
+        Color.ToLinear(CyberwareCustomizationPersistentData.GetSecondaryColor(this.savedData)));
 }
 
 // Drawing a different set of arms puts its style back
@@ -1434,6 +1646,9 @@ private func ArmSwapperSwitchTo(arms: ItemID) {
     // the game dresses a fresh one from V's new arms and hands it to the menu, which sets
     // it up for those arms. Editing the old one leaves the menu, the game's preview sync
     // and the previous tab's listener all changing it at once.
+    // Styling still queued for the old preview character stops here
+    this.m_armSwapperPreviewHidden = true;
+    this.m_armSwapperPreviewRun += 1;
     this.HidePuppetPreview();
     this.ReloadPreviewPuppet(n"inventory");
     this.ArmSwapperCommitEdits();
@@ -1487,7 +1702,13 @@ protected cb func OnUninitialize() -> Bool {
     let player: ref<PlayerPuppet> = this.m_player as PlayerPuppet;
     ArmSwapperLog(game, "glamdoc closed. " + ArmSwapperArmsState(player));
     let system: ref<CyberwareCustomizationSystem> = GameInstance.GetScriptableSystemsContainer(game).Get(n"CyberwareCustomizationSystem") as CyberwareCustomizationSystem;
-    if IsDefined(system) { system.ArmSwapperApplyStyleForActiveArms(); }
+    if IsDefined(system) {
+        system.ArmSwapperApplyStyleForActiveArms();
+        // A moment after the menu closes, once the game has drawn V's weapons again
+        if (new SimpleArmSwapperSettings()).stylePerArmType {
+            system.ArmSwapperSetAllSwitchersLater("glamdoc closed", 1.5);
+        }
+    }
     return result;
 }
 
@@ -1566,7 +1787,25 @@ protected cb func OnSelectorChange(evt: ref<GlamdocSelectorChangeEvent>) -> Bool
     let toLauncher: Bool = tabType == 0;
     if toLauncher && ArmSwapperArmsType(EquipmentSystem.GetData(this.m_player).GetActiveMeleeWare()) < 1 { return result; }
     ArmSwapperLog(this.m_player.GetGame(), "glamdoc tab " + IntToString(tabType) + " -> arms " + ArmSwapperName(arms));
-    if ItemID.IsValid(arms) && (NotEquals(this.m_armSwapperLauncherMode, toLauncher) || ArmSwapperArmsType(this.ArmSwapperActiveArms()) != tabType) {
+    if !ItemID.IsValid(arms) { return result; }
+    // The last tab switch is still building its preview character: this one waits for it, and
+    // only the latest tab picked meanwhile is switched to. Switching again while V's arms and the
+    // preview were still changing could crash the game.
+    if ArmSwapperNow(this.m_player.GetGame()) < this.m_armSwapperTabBusyUntil {
+        this.m_armSwapperTabPending = arms;
+        this.m_armSwapperTabPendingLauncher = toLauncher;
+        ArmSwapperLog(this.m_player.GetGame(), "glamdoc tab switch waits for the preview character");
+        return result;
+    }
+    this.ArmSwapperTabTo(arms, toLauncher);
+    return result;
+}
+
+// The tab switch itself, once no other one is still building its preview
+@addMethod(GlamDocGameController)
+private func ArmSwapperTabTo(arms: ItemID, toLauncher: Bool) {
+    let tabType: Int32 = toLauncher ? 0 : ArmSwapperArmsType(arms);
+    if NotEquals(this.m_armSwapperLauncherMode, toLauncher) || ArmSwapperArmsType(this.ArmSwapperActiveArms()) != tabType {
         // Leave a preview first. Otherwise the tab shows the other arms' styles while V keeps
         // the previous arms, and none of those styles can be picked. A style just bought is
         // kept (the menu is only waiting for the preview character); one only previewed is undone.
@@ -1578,10 +1817,49 @@ protected cb func OnSelectorChange(evt: ref<GlamdocSelectorChangeEvent>) -> Bool
             this.m_isProcessingCustomizationChange = false;
         }
         this.m_armSwapperLauncherMode = toLauncher;
+        this.m_armSwapperTabBusyUntil = ArmSwapperNow(this.m_player.GetGame()) + 2.0;
         this.ArmSwapperSwitchTo(arms);
+        // Should the preview never report back, a waiting tab still gets its turn
+        let check: ref<ArmSwapperTabPendingCallback> = new ArmSwapperTabPendingCallback();
+        check.glamdoc = this;
+        GameInstance.GetDelaySystem(this.m_player.GetGame()).DelayCallback(check, 2.05, false);
     }
-    return result;
 }
+
+// A preview character arrived (or the wait ran out): run the tab switch that was waiting, if any
+@addMethod(GlamDocGameController)
+public func ArmSwapperRunPendingTab() {
+    this.m_armSwapperTabBusyUntil = 0.0;
+    if !ItemID.IsValid(this.m_armSwapperTabPending) { return; }
+    let arms: ItemID = this.m_armSwapperTabPending;
+    let toLauncher: Bool = this.m_armSwapperTabPendingLauncher;
+    this.m_armSwapperTabPending = ItemID.None();
+    ArmSwapperLog(this.m_player.GetGame(), "glamdoc waiting tab switch now runs: " + ArmSwapperName(arms));
+    this.ArmSwapperTabTo(arms, toLauncher);
+}
+
+public class ArmSwapperTabPendingCallback extends DelayCallback {
+    public let glamdoc: wref<GlamDocGameController>;
+
+    public func Call() -> Void {
+        let glamdoc: ref<GlamDocGameController> = this.glamdoc;
+        if !IsDefined(glamdoc) { return; }
+        if ArmSwapperNow(GetGameInstance()) >= glamdoc.m_armSwapperTabBusyUntil {
+            glamdoc.ArmSwapperRunPendingTab();
+        }
+    }
+}
+
+// Until when the last tab switch is building its preview character, in engine time
+@addField(GlamDocGameController)
+public let m_armSwapperTabBusyUntil: Float;
+
+// The latest tab picked while another was still building its preview
+@addField(GlamDocGameController)
+public let m_armSwapperTabPending: ItemID;
+
+@addField(GlamDocGameController)
+public let m_armSwapperTabPendingLauncher: Bool;
 
 // With more than one arm type equipped, buying keeps the menu open so the other arms can be
 // styled too. "Apply and close" then keeps the changes; Back discards them, as in the game.
@@ -1716,6 +1994,10 @@ protected cb func OnInventoryPuppetReceived(puppet: ref<gamePuppet>) -> Bool {
     let result: Bool = wrappedMethod(puppet);
     // Previewing a style also builds a new preview character, which should show that style
     this.ArmSwapperStylePreviewSoon(this.m_armSwapperPreviewItem, "new preview");
+    // A tab switch that was waiting for this preview gets its turn now
+    if this.m_armSwapperTabBusyUntil > 0.0 {
+        this.ArmSwapperRunPendingTab();
+    }
     return result;
 }
 
@@ -1835,15 +2117,17 @@ public func ArmSwapperCheckHead(player: ref<PlayerPuppet>, label: String, opt fu
     let game: GameInstance = player.GetGame();
     let names: array<String>;
     let states: array<String>;
+    let baseNames: array<String>;
     let changes: Int32 = 0;
     for comp in player.GetComponents() {
         if IsDefined(comp) && ArmSwapperIsHeadPart(comp.GetName()) {
             let state: String = ArmSwapperHeadPieceState(comp);
             if NotEquals(state, "") {
                 let name: String = NameToString(comp.GetName());
-                // Several pieces can share a name: number the copies
+                // Several pieces can share a name: number the copies #1, #2 and so on
                 let copy: Int32 = 0;
-                for seen in names { if Equals(seen, name) { copy += 1; } }
+                for seen in baseNames { if Equals(seen, name) { copy += 1; } }
+                ArrayPush(baseNames, name);
                 if copy > 0 { name += "#" + IntToString(copy); }
                 ArrayPush(names, name);
                 ArrayPush(states, state);
@@ -2067,6 +2351,15 @@ public func ArmSwapperPieceMask(comp: ref<IComponent>, out mask: Uint64) -> Bool
     return false;
 }
 
+// Sets a piece's look without reloading it (the next reload uses it)
+@if(ModuleExists("Codeware"))
+public func ArmSwapperSetPieceLook(comp: ref<IComponent>, look: CName) {
+    let skinned: ref<entSkinnedMeshComponent> = comp as entSkinnedMeshComponent;
+    if IsDefined(skinned) { skinned.meshAppearance = look; return; }
+    let plain: ref<MeshComponent> = comp as MeshComponent;
+    if IsDefined(plain) { plain.meshAppearance = look; }
+}
+
 @if(ModuleExists("Codeware"))
 public func ArmSwapperSetPieceMask(comp: ref<IComponent>, mask: Uint64) {
     let skinned: ref<entSkinnedMeshComponent> = comp as entSkinnedMeshComponent;
@@ -2095,6 +2388,12 @@ public func ArmSwapperStylePiecesOf(player: ref<PlayerPuppet>, owner: ref<Entity
     // Projectile Launch System, Mantis Blades and Monowire: the game styles Gorilla Arms itself
     // wherever they sit
     if armsType < 0 || armsType > 2 { return -1; }
+    // A manicure whose hiding tag reaches into the Monowire's arm pieces: the whole Monowire style is
+    // left to the game, hiding of plain pieces included, so the plain Monowire stays whole
+    if armsType == 2 && ArmSwapperMonowireNailsWorn(player, owner as GameObject) {
+        ArmSwapperLog(game, "Monowire pieces (" + reason + ") left to the game: a nail item's hiding tag covers them");
+        return -1;
+    }
     let memory: ref<SimpleArmSwapperStyleMemory> = SimpleArmSwapperStyleMemory.Get(game);
     if !IsDefined(memory) { return -1; }
     // The Glamdoc preview character shows the style being previewed, else the saved one, else
@@ -2179,6 +2478,8 @@ public func ArmSwapperStylePiecesOf(player: ref<PlayerPuppet>, owner: ref<Entity
     }
     let changed: Int32 = 0;
     let found: Int32 = 0;
+    let askedAlready: Int32 = 0;
+    let now: Float = ArmSwapperNow(game);
     for piece in memory.ArmSwapperStylePieces() {
         if Equals(piece.key, armsKey) || Equals(piece.key, elementKey) {
             for comp in comps {
@@ -2206,6 +2507,13 @@ public func ArmSwapperStylePiecesOf(player: ref<PlayerPuppet>, owner: ref<Entity
                         && StrContains(ResRef.ToString(mesh), "\\pimp_chrome\\barghest\\")
                         && !StrContains(ResRef.ToString(piece.mesh), "\\pimp_chrome\\barghest\\") {
                         pieceShown = false;
+                    }
+                    // Monowire colour mods put their own whip meshes on the whip strands: a mesh from
+                    // outside the game's folders stays, with its look; the arm pieces still get the style
+                    if pieceShown && StrContains(NameToString(comp.GetName()), "monowire_whip_whip")
+                        && StrContains(ResRef.ToString(mesh), "\\") && !StrBeginsWith(ResRef.ToString(mesh), "base\\") && !StrBeginsWith(ResRef.ToString(mesh), "ep1\\") {
+                        pieceShown = false;
+                        ArmSwapperLog(game, "  piece " + NameToString(piece.comp) + " kept: whip mesh " + ResRef.ToString(mesh) + " from another mod");
                     }
                     // Female V's styles hide the holstered upper arms outside first person and show
                     // photo mode upper arms in their place. Arm pieces from other mods (Split Cyberarm
@@ -2271,22 +2579,34 @@ public func ArmSwapperStylePiecesOf(player: ref<PlayerPuppet>, owner: ref<Entity
                             if NotEquals(piece.mask & ~allowed & 9223372036854775807ul, 0ul) {
                                 ArmSwapperLog(game, "  piece " + NameToString(piece.comp) + " keeps chunks hidden by another mod: " + s"\(piece.mask & ~allowed)");
                             }
-                            if NotEquals(mesh, piece.mesh) {
-                                comp.ChangeResource(piece.mesh, true);
-                                changed += 1;
-                                ArmSwapperLog(game, "  piece " + NameToString(piece.comp) + " mesh " + ResRef.ToString(mesh) + " -> " + ResRef.ToString(piece.mesh));
-                            }
                             // Other mods add variants of a mesh's looks named "<look>__<variant>" (Night City
                             // Glamdoc Colors' finishes): on the same mesh such a variant counts as the look
                             let sameLook: Bool = Equals(look, wantLook)
                                 || (Equals(mesh, piece.mesh) && StrBeginsWith(NameToString(look), NameToString(wantLook) + "__"));
-                            if !sameLook {
-                                comp.ChangeAppearance(wantLook, true);
+                            // One reload per piece. A new mesh is loaded once with its look and mask already
+                            // in place: a second reload (look or refresh) while the new mesh was still loading
+                            // could crash the game, which hit the Monowire arms, whose mask changes on most draws.
+                            if NotEquals(mesh, piece.mesh) {
+                                if !sameLook {
+                                    ArmSwapperSetPieceLook(comp, wantLook);
+                                    memory.ArmSwapperNoteAskedLook(comp, wantLook, now);
+                                }
+                                comp.ChangeResource(piece.mesh, true);
                                 changed += 1;
-                                ArmSwapperLog(game, "  piece " + NameToString(piece.comp) + " look " + NameToString(look) + " -> " + NameToString(wantLook));
-                            }
-                            if maskChanged {
-                                comp.RefreshAppearance();
+                                ArmSwapperLog(game, "  piece " + NameToString(piece.comp) + " mesh " + ResRef.ToString(mesh) + " -> " + ResRef.ToString(piece.mesh)
+                                    + (sameLook ? "" : ", look " + NameToString(look) + " -> " + NameToString(wantLook)));
+                            } else {
+                                // Asked for this look a moment ago: it is on its way, don't reload it again
+                                if !sameLook && memory.ArmSwapperAskedLookLately(comp, wantLook, now) {
+                                    askedAlready += 1;
+                                } else if !sameLook {
+                                    comp.ChangeAppearance(wantLook, true);
+                                    memory.ArmSwapperNoteAskedLook(comp, wantLook, now);
+                                    changed += 1;
+                                    ArmSwapperLog(game, "  piece " + NameToString(piece.comp) + " look " + NameToString(look) + " -> " + NameToString(wantLook));
+                                } else if maskChanged {
+                                    comp.RefreshAppearance();
+                                }
                             }
                         }
                     }
@@ -2297,6 +2617,9 @@ public func ArmSwapperStylePiecesOf(player: ref<PlayerPuppet>, owner: ref<Entity
     if changed > 0 {
         ArmSwapperLog(game, "styled pieces (" + reason + ") for " + ArmSwapperName(arms) + ": " + NameToString(armsKey)
             + (useElement ? " + " + NameToString(element) : "") + ", " + IntToString(changed) + " changes on " + IntToString(found) + " pieces");
+    }
+    if askedAlready > 0 {
+        ArmSwapperLog(game, "styled pieces (" + reason + "): " + IntToString(askedAlready) + " looks already asked for a moment ago, left to load");
     }
     // Copies of V (photo mode, inventory, Glamdoc preview): the Mantis Blades' own nail pieces go off
     // under a Mantis style, as on V. These characters are built fresh, so nothing to bring back.
@@ -2577,9 +2900,13 @@ public class ArmSwapperTidyCallback extends DelayCallback {
     public let player: wref<PlayerPuppet>;
     public let armsType: Int32;
     public let holstered: Bool;
+    public let swapGen: Int32;
 
     public func Call() -> Void {
-        ArmSwapperTidyWorn(this.player, this.armsType, this.holstered);
+        let player: ref<PlayerPuppet> = this.player;
+        // A newer swap has started: these arms are on their way out
+        if !IsDefined(player) || this.swapGen != player.m_armSwapperSwapGen { return; }
+        ArmSwapperTidyWorn(player, this.armsType, this.holstered);
     }
 }
 
@@ -2592,6 +2919,7 @@ public func ArmSwapperTidyWornSoon(player: ref<PlayerPuppet>, armsType: Int32, h
         callback.player = player;
         callback.armsType = armsType;
         callback.holstered = holstered;
+        callback.swapGen = player.m_armSwapperSwapGen;
         GameInstance.GetDelaySystem(player.GetGame()).DelayCallback(callback, delay, false);
     }
 }
@@ -2656,11 +2984,14 @@ public class ArmSwapperStylePiecesCallback extends DelayCallback {
     public let slot: TweakDBID;
     public let slotItem: ItemID;
     public let dump: Bool;
+    // The swap count when this pass was queued (see m_armSwapperSwapGen)
+    public let swapGen: Int32;
 
     public func Call() -> Void {
         let player: ref<PlayerPuppet> = this.player;
         let target: ref<Entity> = this.target;
         if !IsDefined(player) || !IsDefined(target) { return; }
+        if target == player && this.swapGen != player.m_armSwapperSwapGen { return; }
         let inSlot: ref<ItemObject> = GameInstance.GetTransactionSystem(player.GetGame()).GetItemInSlot(target as GameObject, this.slot);
         if !IsDefined(inSlot) || !(inSlot.GetItemID() == this.slotItem) { return; }
         ArmSwapperStylePiecesOf(player, target, this.arms, this.reason, this.view);
@@ -2687,6 +3018,7 @@ public func ArmSwapperStylePiecesSoon(player: ref<PlayerPuppet>, target: ref<Ent
         callback.slot = slot;
         callback.slotItem = slotItem;
         callback.dump = longer ? delay > 3.0 : delay > 0.5;
+        callback.swapGen = player.m_armSwapperSwapGen;
         callback.reason = NameToString(view) + " after " + FloatToStringPrec(delay, 2) + "s";
         GameInstance.GetDelaySystem(player.GetGame()).DelayCallback(callback, delay, false);
     }
@@ -2841,6 +3173,7 @@ public func ArmSwapperGorillaNails(player: ref<PlayerPuppet>, owner: ref<GameObj
             }
             ArrayClear(memory.hiddenNailSlots);
             ArrayClear(memory.hiddenNailItems);
+            memory.hiddenNailsHideMonowire = false;
             ArmSwapperLog(player.GetGame(), "nail items put back");
         }
         return;
@@ -2853,10 +3186,12 @@ public func ArmSwapperGorillaNails(player: ref<PlayerPuppet>, owner: ref<GameObj
         }
         if IsDefined(nails) && ArmSwapperIsNailItem(nails) {
             let nailItem: ItemID = nails.GetItemID();
+            let hidesMonowire: Bool = ArmSwapperHidesMonowire(nails);
             ts.RemoveItemFromSlot(owner, slot);
             if owner == player {
                 ArrayPush(memory.hiddenNailSlots, slot);
                 ArrayPush(memory.hiddenNailItems, nailItem);
+                if hidesMonowire { memory.hiddenNailsHideMonowire = true; }
             }
             ArmSwapperLog(player.GetGame(), "nail item " + ArmSwapperName(nailItem) + " taken off " + TDBID.ToStringDEBUG(slot) + " under Gorilla Arms");
         }
@@ -2932,7 +3267,51 @@ public class ArmSwapperLauncherSlotCallback extends AttachmentSlotsScriptCallbac
         if ArmSwapperNailsMatter(slot) {
             ArmSwapperGorillaNailsSoon(system.ArmSwapperPlayer());
         }
+        // A nail item came off: once the game has dropped its hiding tag, the Monowire gets its style
+        // again (if the item was one that kept it plain). Not under Gorilla Arms, where the mod itself
+        // takes nail items off and puts them back afterwards.
+        if slot == t"OutfitSlots.FingernailsLeft" || slot == t"OutfitSlots.FingernailsRight" {
+            let player: ref<PlayerPuppet> = system.ArmSwapperPlayer();
+            let eqData: ref<EquipmentSystemPlayerData> = IsDefined(player) ? EquipmentSystem.GetData(player) : null;
+            if IsDefined(eqData) && ArmSwapperArmsType(eqData.GetActiveMeleeWare()) == 2 {
+                let later: ref<ArmSwapperRestyleLaterCallback> = new ArmSwapperRestyleLaterCallback();
+                later.player = player;
+                later.why = "nail item taken off";
+                GameInstance.GetDelaySystem(player.GetGame()).DelayCallback(later, 1.0, false);
+            }
+        }
     }
+}
+
+public class ArmSwapperRestyleLaterCallback extends DelayCallback {
+    public let player: wref<PlayerPuppet>;
+    public let why: String;
+
+    public func Call() -> Void {
+        let player: ref<PlayerPuppet> = this.player;
+        if IsDefined(player) { ArmSwapperRestyleWorn(player, this.why); }
+    }
+}
+
+// Nail items whose hiding tag reaches into the Monowire's arm pieces: luvwich's manicures hide part 2
+// of them, which is the fingernails on the plain Monowire but part of the arm on its styles. With such
+// an item on, the game puts the tag's hiding back after every change to those pieces, and changing them
+// as well could crash the game. The Monowire is then left to the game (plain shape, style colours).
+public func ArmSwapperHidesMonowire(item: ref<ItemObject>) -> Bool {
+    return IsDefined(item) && item.MatchVisualTag(n"lw_hide_basegame_nails");
+}
+
+public func ArmSwapperMonowireNailsWorn(player: ref<PlayerPuppet>, owner: ref<GameObject>) -> Bool {
+    if !IsDefined(player) { return false; }
+    let ts: ref<TransactionSystem> = GameInstance.GetTransactionSystem(player.GetGame());
+    let slots: array<TweakDBID> = [t"OutfitSlots.FingernailsLeft", t"OutfitSlots.FingernailsRight"];
+    for slot in slots {
+        if ArmSwapperHidesMonowire(ts.GetItemInSlot(player, slot)) { return true; }
+        if IsDefined(owner) && owner != player && ArmSwapperHidesMonowire(ts.GetItemInSlot(owner, slot)) { return true; }
+    }
+    // Taken off for Gorilla Arms, and coming back with the next arms
+    let memory: ref<SimpleArmSwapperStyleMemory> = SimpleArmSwapperStyleMemory.Get(player.GetGame());
+    return IsDefined(memory) && memory.hiddenNailsHideMonowire;
 }
 
 // The launcher's style switcher stays off V while melee arms are equipped. Setting it adds the
@@ -3119,6 +3498,19 @@ public func ArmSwapperPlayer() -> ref<PlayerPuppet> {
 @addField(GlamDocGameController)
 private let m_armSwapperPreviewRun: Int32;
 
+// True from a tab switch hiding the preview character until the new one is shown
+@addField(GlamDocGameController)
+private let m_armSwapperPreviewHidden: Bool;
+
+@wrapMethod(GlamDocGameController)
+protected cb func OnPuppetPreviewShown() -> Bool {
+    let result: Bool = wrappedMethod();
+    this.m_armSwapperPreviewHidden = false;
+    // The new preview character is up: style it now
+    this.ArmSwapperStylePreviewNow(this.m_armSwapperPreviewItem, this.m_armSwapperPreviewRun, "preview shown", false);
+    return result;
+}
+
 // The style being previewed, or none while the saved style is shown
 @addField(GlamDocGameController)
 private let m_armSwapperPreviewItem: ItemID;
@@ -3126,6 +3518,10 @@ private let m_armSwapperPreviewItem: ItemID;
 @addMethod(GlamDocGameController)
 public func ArmSwapperStylePreviewNow(styleItem: ItemID, run: Int32, reason: String, dump: Bool) {
     if run != this.m_armSwapperPreviewRun { return; }
+    // While the menu swaps its preview character (from hiding the old one until the new one is
+    // shown), its pieces are left alone: changing pieces of a character being taken down or set up
+    // could crash the game. OnPuppetPreviewShown styles the new one.
+    if this.m_armSwapperPreviewHidden || this.m_isProcessingCustomizationChange { return; }
     let player: ref<PlayerPuppet> = this.m_player as PlayerPuppet;
     let puppet: ref<GameObject> = this.m_previewPuppet;
     if !IsDefined(player) || !IsDefined(puppet) { return; }
