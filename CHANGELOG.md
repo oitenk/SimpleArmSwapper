@@ -1,5 +1,21 @@
 # Changelog
 
+## 3.0.0
+
+NEW! Glamdoc styles now show on all your arm cyberware, in every arm slot. The game does the styling itself now, through a small plugin that comes with the mod.
+
+Style nails (the coloured fingernails that come with a Glamdoc style) now show on Mantis Blades in every arm slot.
+
+With nail items that hide part of the Monowire (such as luvwich's manicures), the Monowire now shows its full style in every arm slot.
+
+Styles from other mods, such as Split Cyberarm Styles, now stay on when you swap arms, load a save or change your top.
+
+Long sleeves now change the style of all your arm cyberware, not only the arms you hold.
+
+The mod is much smaller and lighter.
+
+Codeware is now required.
+
 ## 2.7.1
 
 Hopefully fixed the game crashing when you swap arms quickly. Thank you to everyone who reported it and sent logs, they made this possible. The cause: every time you swapped, the mod asked the game to change your arm style while your arms were still coming out, and pressing fast stacked those requests until the game tripped over them. Now each arm type's style is set once, when a save loads, when you leave the Glamdoc, and after a ripperdoc visit, and a swap only changes the colours. Swaps are lighter as a result too.

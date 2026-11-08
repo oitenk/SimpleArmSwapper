@@ -6,3 +6,6 @@ _archive/
 
 # Screenshots, clips and text for the mod page.
 promo/
+
+# Native plugin build output (the DLL itself is copied to red4ext\plugins\ and shipped)
+native/build/

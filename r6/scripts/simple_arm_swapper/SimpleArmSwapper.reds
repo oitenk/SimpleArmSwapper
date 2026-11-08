@@ -1,5 +1,5 @@
 // r6/scripts/simple_arm_swapper/SimpleArmSwapper.reds
-// Simple Arm Swapper v2.7.1
+// Simple Arm Swapper v3.0.0
 
 // Other mods can detect this one with @if(ModuleExists("SimpleArmSwapperMod"))
 module SimpleArmSwapperMod
@@ -7,7 +7,7 @@ module SimpleArmSwapperMod
 @if(ModuleExists("Codeware.Localization"))
 import Codeware.Localization.*
 
-public func Version() -> String = "2.7.1"
+public func Version() -> String = "3.0.0"
 
 // Options shown in the Mod Settings menu. Mod Settings is optional: when it is installed it
 // writes the saved choice into this class's default values (at startup and whenever the
@@ -755,6 +755,9 @@ public class SimpleArmSwapperStyleMemory extends ScriptableSystem {
     private persistent let m_enabled: array<Bool>;
     private persistent let m_primaryColor: array<Int32>;
     private persistent let m_secondaryColor: array<Int32>;
+    // The switcher option the game saved with the style (-1: not known). Usually the style item's own
+    // option; another mod can pick a different one (Split Cyberarm Styles' left/right pairs).
+    private persistent let m_switcherIndex: array<Int32>;
 
     // True while the Glamdoc menu is open. Styles are only put back once it closes.
     public let glamdocOpen: Bool;
@@ -781,6 +784,9 @@ public class SimpleArmSwapperStyleMemory extends ScriptableSystem {
         while ArraySize(this.m_primaryColor) < 4 {
             ArrayPush(this.m_primaryColor, 0);
         }
+        while ArraySize(this.m_switcherIndex) < 4 {
+            ArrayPush(this.m_switcherIndex, -1);
+        }
         while ArraySize(this.m_secondaryColor) < 4 {
             ArrayPush(this.m_secondaryColor, 0);
         }
@@ -800,6 +806,18 @@ public class SimpleArmSwapperStyleMemory extends ScriptableSystem {
         this.m_enabled[armsType] = enabled;
         this.m_primaryColor[armsType] = primaryColor;
         this.m_secondaryColor[armsType] = secondaryColor;
+        this.m_switcherIndex[armsType] = -1;
+    }
+
+    public func RememberSwitcherIndex(armsType: Int32, index: Int32) {
+        if armsType < 0 || armsType >= 4 { return; }
+        this.EnsureEntries();
+        this.m_switcherIndex[armsType] = index;
+    }
+
+    public func GetSwitcherIndex(armsType: Int32) -> Int32 {
+        this.EnsureEntries();
+        return armsType >= 0 && armsType < 4 ? this.m_switcherIndex[armsType] : -1;
     }
 
     // The arm type whose remembered style uses this switcher, or -1
@@ -841,6 +859,7 @@ public class SimpleArmSwapperStyleMemory extends ScriptableSystem {
     private let m_snapEnabled: array<Bool>;
     private let m_snapPrimaryColor: array<Int32>;
     private let m_snapSecondaryColor: array<Int32>;
+    private let m_snapSwitcherIndex: array<Int32>;
 
     public func TakeSnapshot() {
         this.EnsureEntries();
@@ -850,6 +869,7 @@ public class SimpleArmSwapperStyleMemory extends ScriptableSystem {
         this.m_snapEnabled = this.m_enabled;
         this.m_snapPrimaryColor = this.m_primaryColor;
         this.m_snapSecondaryColor = this.m_secondaryColor;
+        this.m_snapSwitcherIndex = this.m_switcherIndex;
     }
 
     public func RestoreSnapshot() {
@@ -860,19 +880,16 @@ public class SimpleArmSwapperStyleMemory extends ScriptableSystem {
         this.m_enabled = this.m_snapEnabled;
         this.m_primaryColor = this.m_snapPrimaryColor;
         this.m_secondaryColor = this.m_snapSecondaryColor;
+        this.m_switcherIndex = this.m_snapSwitcherIndex;
+        this.EnsureEntries();
     }
 
-    // Style data for styling the pieces of V's arms (see "Styling arms the game leaves unstyled")
-    private let m_stylePieces: array<ref<ArmSwapperStylePiece>>;
-
-    private let m_elementHints: array<ref<ArmSwapperElementHint>>;
-
-    // The element each arm type's item was last seen with, for when its pieces are already styled
-    private let m_lastElement: array<CName>;
-
-    // Holstered Mantis Blade pieces the mod hid on V while the blades are out, with their masks
-    public let hiddenHolstered: array<wref<IComponent>>;
-    public let hiddenMasks: array<Uint64>;
+    // With native styling: pieces of other arm types switched off on V, and the arm type of each
+    public let hiddenStray: array<wref<IComponent>>;
+    public let hiddenStrayType: array<Int32>;
+    // Whether Simple Arm Swapper Native was looked for this session, and its version (0: absent or off)
+    public let nativeChecked: Bool;
+    public let nativeVersion: Int32;
     // V's own nail pieces switched off under a painted-nail style
     public let hiddenNails: array<wref<IComponent>>;
     // Mantis Blade nail pieces switched off under a Mantis style
@@ -880,129 +897,14 @@ public class SimpleArmSwapperStyleMemory extends ScriptableSystem {
     // Nail items taken out of Equipment-EX's fingernail slots under Gorilla Arms, to put back
     public let hiddenNailSlots: array<TweakDBID>;
     public let hiddenNailItems: array<ItemID>;
-    // Arm pieces hidden because a style leaves them out; they may show again for another style
-    private let m_hidForStyle: array<wref<IComponent>>;
 
-    public func ArmSwapperRememberHidForStyle(comp: ref<IComponent>) {
-        if !this.ArmSwapperHidForStyle(comp) { ArrayPush(this.m_hidForStyle, comp); }
-    }
-
-    public func ArmSwapperHidForStyle(comp: ref<IComponent>) -> Bool {
-        for c in this.m_hidForStyle {
-            if c == comp { return true; }
-        }
-        return false;
-    }
-
-    // Chunks of a piece that this mod hid for a style. Only those come back for another style: chunks
-    // hidden by something else (an item's hiding tag, such as KiasuBurger's cosmetic arms or
-    // luvwich's nails) stay hidden.
-    private let m_maskComps: array<wref<IComponent>>;
-    private let m_maskCleared: array<Uint64>;
-
-    public func ArmSwapperClearedChunks(comp: ref<IComponent>) -> Uint64 {
-        let i: Int32 = 0;
-        while i < ArraySize(this.m_maskComps) {
-            if this.m_maskComps[i] == comp { return this.m_maskCleared[i]; }
-            i += 1;
-        }
-        return 0ul;
-    }
-
-    // Looks this mod asked arm pieces to switch to in the last moment. Some pieces keep reporting
-    // their old look after the switch (the Monowire whips), so every styling pass asked again and
-    // reloaded them all; with fast swaps that piled up on pieces being taken off and could crash.
-    private let m_askedComps: array<wref<IComponent>>;
-    private let m_askedLooks: array<CName>;
-    private let m_askedTimes: array<Float>;
-
-    // A nail item with a hiding tag on the Monowire arms was taken off for Gorilla Arms, and comes back
-    public let hiddenNailsHideMonowire: Bool;
-
-    public func ArmSwapperAskedLookLately(comp: ref<IComponent>, look: CName, now: Float) -> Bool {
-        let i: Int32 = 0;
-        while i < ArraySize(this.m_askedComps) {
-            if this.m_askedComps[i] == comp && Equals(this.m_askedLooks[i], look) && now - this.m_askedTimes[i] < 3.0 {
-                return true;
-            }
-            i += 1;
-        }
-        return false;
-    }
-
-    public func ArmSwapperNoteAskedLook(comp: ref<IComponent>, look: CName, now: Float) {
-        let comps: array<wref<IComponent>>;
-        let looks: array<CName>;
-        let times: array<Float>;
-        let i: Int32 = 0;
-        while i < ArraySize(this.m_askedComps) {
-            let c: ref<IComponent> = this.m_askedComps[i];
-            if IsDefined(c) && c != comp && now - this.m_askedTimes[i] < 3.0 {
-                ArrayPush(comps, c);
-                ArrayPush(looks, this.m_askedLooks[i]);
-                ArrayPush(times, this.m_askedTimes[i]);
-            }
-            i += 1;
-        }
-        ArrayPush(comps, comp);
-        ArrayPush(looks, look);
-        ArrayPush(times, now);
-        this.m_askedComps = comps;
-        this.m_askedLooks = looks;
-        this.m_askedTimes = times;
-    }
-
-    public func ArmSwapperNoteMask(comp: ref<IComponent>, oldMask: Uint64, newMask: Uint64) {
-        let cleared: Uint64 = (this.ArmSwapperClearedChunks(comp) | (oldMask & ~newMask)) & ~newMask;
-        let comps: array<wref<IComponent>>;
-        let masks: array<Uint64>;
-        let i: Int32 = 0;
-        while i < ArraySize(this.m_maskComps) {
-            let c: ref<IComponent> = this.m_maskComps[i];
-            if IsDefined(c) && c != comp {
-                ArrayPush(comps, c);
-                ArrayPush(masks, this.m_maskCleared[i]);
-            }
-            i += 1;
-        }
-        if NotEquals(cleared, 0ul) {
-            ArrayPush(comps, comp);
-            ArrayPush(masks, cleared);
-        }
-        this.m_maskComps = comps;
-        this.m_maskCleared = masks;
-    }
-
-    public func ArmSwapperForgetHidForStyle(comp: ref<IComponent>) {
-        let kept: array<wref<IComponent>>;
-        for c in this.m_hidForStyle {
-            if IsDefined(c) && c != comp { ArrayPush(kept, c); }
-        }
-        this.m_hidForStyle = kept;
-    }
+    // Kept for other mods built against 2.7.1 and older (such as Split Cyberarm Styles), which read
+    // the style piece table the mod used to paint arm pieces from. The game styles the arms itself
+    // now, so the table is empty and nothing reads it here.
+    private let m_stylePieces: array<ref<ArmSwapperStylePiece>>;
 
     public func ArmSwapperStylePieces() -> array<ref<ArmSwapperStylePiece>> {
-        if ArraySize(this.m_stylePieces) == 0 {
-            ArmSwapperBuildStylePieces(this.m_stylePieces);
-            ArmSwapperAddBarghestPieces(this.m_stylePieces);
-            ArmSwapperBuildElementHints(this.m_elementHints);
-        }
         return this.m_stylePieces;
-    }
-
-    public func ArmSwapperElementHints() -> array<ref<ArmSwapperElementHint>> {
-        this.ArmSwapperStylePieces();
-        return this.m_elementHints;
-    }
-
-    public func ArmSwapperRememberElement(armsType: Int32, element: CName) {
-        while ArraySize(this.m_lastElement) < 4 { ArrayPush(this.m_lastElement, n"base"); }
-        if armsType >= 0 && armsType < 4 { this.m_lastElement[armsType] = element; }
-    }
-
-    public func ArmSwapperLastElement(armsType: Int32) -> CName {
-        if armsType >= 0 && armsType < ArraySize(this.m_lastElement) { return this.m_lastElement[armsType]; }
-        return n"base";
     }
 }
 
@@ -1018,6 +920,7 @@ private func ArmSwapperRememberCurrentStyle() {
     ArmSwapperLog(this.GetGameInstance(), "remember type " + IntToString(ArmSwapperStyleType(styleItem)) + ": " + ArmSwapperStyleDataText(this.savedData));
     memory.Remember(ArmSwapperStyleType(styleItem), styleItem, this.savedData.switcherName, this.savedData.enabled,
         Cast<Int32>(this.savedData.primaryColorIndex), Cast<Int32>(this.savedData.secondaryColorIndex));
+    memory.RememberSwitcherIndex(ArmSwapperStyleType(styleItem), Cast<Int32>(this.savedData.switcherIndex));
 }
 
 // Arm cyberware tagged for the MaxTac look (the MaxTac Mantis Blades, and arms from other mods
@@ -1104,7 +1007,7 @@ public func ArmSwapperNow(game: GameInstance) -> Float {
 
 // The game repeats its MaxTac check whenever the holstered Mantis Blades appear (mounting a bike,
 // for one), which switches the MaxTac look back on over a style. Apply the style rule again
-// straight after, and restyle the arms V is wearing.
+// straight after, and tidy the arms V is wearing.
 // The game also runs this check while a save is still loading. Switching the look off at that
 // point re-applies V's customization too early, which left V's hair showing in first person
 // with a weapon drawn. During the first moments after a load the switch waits a little.
@@ -1155,17 +1058,7 @@ public func ArmSwapperMaxTacOverStyle(before: Bool) {
     if !this.savedData.hasMaxTacApperanceEquipped { return; }
     ArmSwapperLog(this.GetGameInstance(), "game switched the MaxTac look on (was " + BoolToString(before) + ") over the style of " + ArmSwapperName(arms) + "; switching it off");
     this.ArmSwapperRefreshMaxTacLook(true);
-    // Restyle what V is wearing now: the arms in hand, or the holstered arms
-    let ts: ref<TransactionSystem> = GameInstance.GetTransactionSystem(this.GetGameInstance());
-    let inHand: ref<ItemObject> = ts.GetItemInSlot(player, t"AttachmentSlots.WeaponRight");
-    if IsDefined(inHand) && inHand.GetItemID() == arms {
-        ArmSwapperStylePiecesSoon(player, player, arms, n"out", t"AttachmentSlots.WeaponRight", arms);
-    }
-    let holstered: ref<ItemObject> = ts.GetItemInSlot(player, t"AttachmentSlots.RightArm");
-    if IsDefined(holstered) && ArmSwapperArmsForHolstered(player, holstered.GetItemID()) == arms {
-        ArmSwapperStylePiecesSoon(player, player, arms, n"hfppAuto", t"AttachmentSlots.RightArm", holstered.GetItemID());
-        ArmSwapperStylePiecesSoon(player, player, arms, n"htppAuto", t"AttachmentSlots.RightArm", holstered.GetItemID());
-    }
+    ArmSwapperTidyWornNow(player, "MaxTac look switched off");
 }
 
 // The game's own test for MaxTac-based arms (the MaxTac Mantis Blades and modded arms built on
@@ -1259,6 +1152,12 @@ public func ArmSwapperApplyStyleFor(armsItem: ItemID, opt fromGlamdoc: Bool) {
         let longSleevesIndex: Int32 = record.LongSleevesCustomizationIndex();
         if longSleevesIndex != -1 && EquipmentSystemPlayerData.HasLongSleeves(player) {
             switcherIndex = longSleevesIndex;
+        }
+        // Another mod saved a different option with this style (Split Cyberarm Styles' left/right
+        // pairs): keep that one
+        let savedIndex: Int32 = memory.GetSwitcherIndex(armsType);
+        if savedIndex >= 0 && savedIndex != record.CustomizationIndex() && savedIndex != longSleevesIndex {
+            switcherIndex = savedIndex;
         }
         if IsDefined(record.BrandHandle()) {
             brandDataID = record.BrandHandle().GetID();
@@ -1410,9 +1309,11 @@ public func ArmSwapperSetAllSwitchers(why: String) {
     let eqData: ref<EquipmentSystemPlayerData> = EquipmentSystem.GetData(player);
     if !IsDefined(eqData) { return; }
     let activeType: Int32 = ArmSwapperArmsType(eqData.GetActiveMeleeWare());
-    // Melee arms only (1 to 3): the launcher's style is kept off V beside melee arms. The active
-    // type goes last, so its switcher is the one the game saw most recently.
+    // The launcher first, and only with native styling (without it, its style is kept off V beside
+    // melee arms); then the melee arms. The active type goes last, so its switcher is the one the game
+    // saw most recently and its painted nails are the ones on V.
     let order: array<Int32>;
+    if ArmSwapperNativeStyling(this.GetGameInstance()) && memory.HasStyle(0) { ArrayPush(order, 0); }
     let t: Int32 = 1;
     while t <= 3 {
         if t != activeType { ArrayPush(order, t); }
@@ -1429,6 +1330,18 @@ public func ArmSwapperSetAllSwitchers(why: String) {
                     index = record.CustomizationIndex();
                     if record.LongSleevesCustomizationIndex() != -1 && EquipmentSystemPlayerData.HasLongSleeves(player) {
                         index = record.LongSleevesCustomizationIndex();
+                    }
+                    // Another mod saved a different option with this style (Split Cyberarm Styles'
+                    // left/right pairs): keep that one
+                    let saved: Int32 = memory.GetSwitcherIndex(armsType);
+                    if saved >= 0 && saved != record.CustomizationIndex() && saved != record.LongSleevesCustomizationIndex() {
+                        index = saved;
+                    }
+                    // The arms in use: the option the game holds right now, which already follows long
+                    // sleeves (the game re-sends it when the top changes, and other mods adjust it there)
+                    if armsType == activeType && this.savedData.enabled && this.savedData.customizationItemID == memory.GetStyleItem(armsType)
+                        && Equals(this.savedData.switcherName, memory.GetSwitcherName(armsType)) {
+                        index = Cast<Int32>(this.savedData.switcherIndex);
                     }
                 }
                 if NotEquals(memory.GetSwitcherName(armsType), n"None") { switcher = memory.GetSwitcherName(armsType); }
@@ -1456,6 +1369,9 @@ public func ArmSwapperSetAllSwitchers(why: String) {
     // The arms in use keep their colours
     this.SetCustomizationParameters(this.savedData.enabled, Color.ToLinear(CyberwareCustomizationPersistentData.GetPrimaryColor(this.savedData)),
         Color.ToLinear(CyberwareCustomizationPersistentData.GetSecondaryColor(this.savedData)));
+    // Native styling: the style changes can leave other arm types' pieces on V, with no arms attaching
+    // to tidy them away
+    ArmSwapperTidyWornNow(player, "switchers set");
 }
 
 // Drawing a different set of arms puts its style back
@@ -2288,22 +2204,34 @@ public func ArmSwapperProbeSoon(player: ref<PlayerPuppet>, arms: ItemID) {
     GameInstance.GetDelaySystem(player.GetGame()).DelayCallback(callback, 0.6, false);
 }
 
-// --- Styling arms the game leaves unstyled ---
-// The game styles arm cyberware from one "owner": the arms in the first arm slot when the save
-// loaded. Mantis Blades, Monowire and the Projectile Launch System share that styling, so with more
-// than one of them installed, only the owner showed its Glamdoc style. A style only tells named
-// pieces of V's arms which mesh and look to use, so the mod applies the saved style of the arms in
-// use to those pieces itself, from the game's own style data (SimpleArmSwapperStyleData.reds). Pieces
-// the game already styled are left alone.
-
-// The game's style switcher for each melee arm type
-public func ArmSwapperSwitcherForType(armsType: Int32) -> CName {
-    if armsType == 0 { return n"launcher"; }
-    if armsType == 1 { return n"mantis"; }
-    if armsType == 2 { return n"monowire"; }
-    if armsType == 3 { return n"strongarms"; }
-    return n"None";
+// One row of the style piece table that 2.7.1 and older painted arm pieces from. Kept, with its
+// constructor, for other mods that use it (see SimpleArmSwapperStyleMemory.ArmSwapperStylePieces).
+public class ArmSwapperStylePiece {
+    public let key: CName;
+    public let comp: CName;
+    public let mesh: ResRef;
+    public let app: CName;
+    public let keepSkin: Bool;
+    public let mask: Uint64;
+    public let hide: Bool;
 }
+
+public func ArmSwapperStylePieceNew(key: CName, comp: CName, mesh: ResRef, app: CName, keepSkin: Bool, mask: Uint64, hide: Bool) -> ref<ArmSwapperStylePiece> {
+    let piece: ref<ArmSwapperStylePiece> = new ArmSwapperStylePiece();
+    piece.key = key;
+    piece.comp = comp;
+    piece.mesh = mesh;
+    piece.app = app;
+    piece.keepSkin = keepSkin;
+    piece.mask = mask;
+    piece.hide = hide;
+    return piece;
+}
+
+// --- Arm styles in every arm slot ---
+// The game styles arm cyberware itself once Simple Arm Swapper Native is installed (see "Native
+// styling" below): the mod only sets each arm type's style switcher and tidies away pieces of other
+// arm types. Without the plugin, arms outside the first arm slot show their plain look.
 
 // The style index the game would use for a style item on this player (long sleeves change it)
 public func ArmSwapperStyleIndex(player: ref<PlayerPuppet>, styleItem: ItemID) -> Int32 {
@@ -2317,493 +2245,15 @@ public func ArmSwapperStyleIndex(player: ref<PlayerPuppet>, styleItem: ItemID) -
     return index;
 }
 
-@if(ModuleExists("Codeware"))
-public func ArmSwapperPieceLook(comp: ref<IComponent>, out mesh: ResRef, out look: CName) -> Bool {
-    let skinned: ref<entSkinnedMeshComponent> = comp as entSkinnedMeshComponent;
-    if IsDefined(skinned) {
-        let meshRef: ResourceAsyncRef = skinned.mesh;
-        mesh = ResourceAsyncRef.GetPath(meshRef);
-        look = skinned.meshAppearance;
-        return true;
-    }
-    let plain: ref<MeshComponent> = comp as MeshComponent;
-    if IsDefined(plain) {
-        let plainRef: ResourceAsyncRef = plain.mesh;
-        mesh = ResourceAsyncRef.GetPath(plainRef);
-        look = plain.meshAppearance;
-        return true;
-    }
-    return false;
-}
-
-// V's skin tone looks are named like "01_ca_pale" or "02_ca_limestone"
-public func ArmSwapperIsSkinLook(look: CName) -> Bool {
-    return StrFindFirst(NameToString(look), "_ca_") == 2;
-}
-
-// Which parts of a piece's mesh show (its chunk mask)
-@if(ModuleExists("Codeware"))
-public func ArmSwapperPieceMask(comp: ref<IComponent>, out mask: Uint64) -> Bool {
-    let skinned: ref<entSkinnedMeshComponent> = comp as entSkinnedMeshComponent;
-    if IsDefined(skinned) { mask = skinned.chunkMask; return true; }
-    let plain: ref<MeshComponent> = comp as MeshComponent;
-    if IsDefined(plain) { mask = plain.chunkMask; return true; }
-    return false;
-}
-
-// Sets a piece's look without reloading it (the next reload uses it)
-@if(ModuleExists("Codeware"))
-public func ArmSwapperSetPieceLook(comp: ref<IComponent>, look: CName) {
-    let skinned: ref<entSkinnedMeshComponent> = comp as entSkinnedMeshComponent;
-    if IsDefined(skinned) { skinned.meshAppearance = look; return; }
-    let plain: ref<MeshComponent> = comp as MeshComponent;
-    if IsDefined(plain) { plain.meshAppearance = look; }
-}
-
-@if(ModuleExists("Codeware"))
-public func ArmSwapperSetPieceMask(comp: ref<IComponent>, mask: Uint64) {
-    let skinned: ref<entSkinnedMeshComponent> = comp as entSkinnedMeshComponent;
-    if IsDefined(skinned) { skinned.chunkMask = mask; return; }
-    let plain: ref<MeshComponent> = comp as MeshComponent;
-    if IsDefined(plain) { plain.chunkMask = mask; }
-}
-
-// Applies the saved style of the given arms to the pieces of V's arms. Returns how many pieces it
-// changed, or -1 when there is nothing to apply.
+// Called wherever arms appear on V or on a copy of V (photo mode, inventory, Glamdoc preview). The
+// game styles the arms itself; copies only get other arm types' leftover pieces tidied away (V's are
+// tidied in ArmSwapperTidyWorn). Kept as one entry point so all those places stay hooked up.
 @if(ModuleExists("Codeware"))
 public func ArmSwapperStylePiecesOf(player: ref<PlayerPuppet>, owner: ref<Entity>, arms: ItemID, reason: String, opt view: CName, opt styleOverride: ItemID) -> Int32 {
-    if Equals(view, n"None") { view = n"out"; }
-    // V's holstered arms: "hfppAuto" styles only first person pieces, "htppAuto" only third person
-    // ones (V wears those in vehicles, even in first person view)
-    let onlyFpp: Bool = Equals(view, n"hfppAuto");
-    let onlyTpp: Bool = Equals(view, n"htppAuto");
-    if onlyFpp { view = n"hfpp"; }
-    if onlyTpp { view = n"htpp"; }
-    if (Equals(view, n"hfpp") || Equals(view, n"htpp")) && owner == player && ArmSwapperArmsType(arms) == 1 {
-        ArmSwapperShowHiddenHolstered(player);
-    }
-    if !(new SimpleArmSwapperSettings()).stylePerArmType || !IsDefined(player) || !IsDefined(owner) { return -1; }
-    let game: GameInstance = player.GetGame();
-    let armsType: Int32 = ArmSwapperArmsType(arms);
-    // Projectile Launch System, Mantis Blades and Monowire: the game styles Gorilla Arms itself
-    // wherever they sit
-    if armsType < 0 || armsType > 2 { return -1; }
-    // A manicure whose hiding tag reaches into the Monowire's arm pieces: the whole Monowire style is
-    // left to the game, hiding of plain pieces included, so the plain Monowire stays whole
-    if armsType == 2 && ArmSwapperMonowireNailsWorn(player, owner as GameObject) {
-        ArmSwapperLog(game, "Monowire pieces (" + reason + ") left to the game: a nail item's hiding tag covers them");
-        return -1;
-    }
-    let memory: ref<SimpleArmSwapperStyleMemory> = SimpleArmSwapperStyleMemory.Get(game);
-    if !IsDefined(memory) { return -1; }
-    // The Glamdoc preview character shows the style being previewed, else the saved one, else
-    // the plain look. Everywhere else only a saved style is applied.
-    let isPreview: Bool = Equals(view, n"preview") || Equals(view, n"previewOut");
-    let styleItem: ItemID = ItemID.None();
-    if ItemID.IsValid(styleOverride) {
-        if ArmSwapperStyleType(styleOverride) != armsType { return -1; }
-        styleItem = styleOverride;
-    } else {
-        if memory.HasStyle(armsType) && memory.IsEnabled(armsType) {
-            styleItem = memory.GetStyleItem(armsType);
-        }
-    }
-    let index: Int32 = -1;
-    let plainOnly: Bool = false;
-    if ItemID.IsValid(styleItem) {
-        index = ArmSwapperStyleIndex(player, styleItem);
-    } else {
-        if armsType == 1 {
-            // Mantis Blades without a style: the plain pieces, which also undoes earlier styling
-            // left behind on MaxTac-based blades. The blade look is left to the item (MaxTac blades
-            // keep their MaxTac look). Only the Mantis Blades: the Monowire uses the same piece
-            // names in hand and put away, so plain in-hand pieces would land on holstered ones.
-            index = 0;
-            plainOnly = true;
-        } else {
-            if isPreview { index = 0; }
-        }
-    }
-    let switcher: CName = memory.GetKnownSwitcherName(armsType);
-    if Equals(switcher, n"None") { switcher = ArmSwapperSwitcherForType(armsType); }
-    if index < 0 || Equals(switcher, n"None") { return -1; }
-    let gender: String = Equals(player.GetResolvedGenderName(), n"Female") ? "f" : "m";
-
-    // Arms in every slot are checked, the first included. The game styles some of them itself, but
-    // not always (MaxTac-based arms, arms swapped in at a ripperdoc); where it did, the pieces
-    // already match and nothing changes.
-    let comps: array<ref<IComponent>> = owner.GetComponents();
-
-    // The item's element, from the look its element pieces start with (arms out only)
-    let isOut: Bool = Equals(view, n"out") || Equals(view, n"previewOut");
-    let useElement: Bool = (isOut || isPreview) && !plainOnly;
-    let hintKey: CName = StringToName(gender + "_" + NameToString(switcher));
-    let element: CName = n"None";
-    for hint in memory.ArmSwapperElementHints() {
-        if useElement && Equals(hint.key, hintKey) && Equals(element, n"None") {
-            for comp in comps {
-                if IsDefined(comp) && Equals(comp.GetName(), hint.comp) {
-                    let m: ResRef;
-                    let l: CName;
-                    if ArmSwapperPieceLook(comp, m, l) && Equals(l, hint.app) {
-                        element = hint.element;
-                    }
-                }
-            }
-        }
-    }
-    if Equals(element, n"None") {
-        element = memory.ArmSwapperLastElement(armsType);
-    } else {
-        memory.ArmSwapperRememberElement(armsType, element);
-    }
-
-    let prefix: String = gender + "_" + NameToString(switcher) + "_" + IntToString(index) + "_";
-    let armsSuffix: String = isOut ? "arms" : (isPreview ? "htpp" : NameToString(view));
-    let armsKey: CName = StringToName(prefix + armsSuffix);
-    let elementKey: CName = useElement ? StringToName(prefix + NameToString(element)) : n"None";
-    // V's skin tone, from a plain (unstyled) arm piece that wears it
-    let skinTone: CName = n"None";
-    for comp in comps {
-        if IsDefined(comp) && Equals(skinTone, n"None") && StrBeginsWith(NameToString(comp.GetName()), "a0_00") {
-            let toneMesh: ResRef;
-            let toneLook: CName;
-            if ArmSwapperPieceLook(comp, toneMesh, toneLook) && ArmSwapperIsSkinLook(toneLook) {
-                let tonePath: String = ResRef.ToString(toneMesh);
-                if !StrContains(tonePath, "\\pimp_chrome\\") {
-                    skinTone = toneLook;
-                }
-            }
-        }
-    }
-    let changed: Int32 = 0;
-    let found: Int32 = 0;
-    let askedAlready: Int32 = 0;
-    let now: Float = ArmSwapperNow(game);
-    for piece in memory.ArmSwapperStylePieces() {
-        if Equals(piece.key, armsKey) || Equals(piece.key, elementKey) {
-            for comp in comps {
-                if IsDefined(comp) && Equals(comp.GetName(), piece.comp) {
-                    let mesh: ResRef;
-                    let look: CName;
-                    let mask: Uint64;
-                    // A piece the game hid completely is a spare copy (V can carry several pieces of
-                    // the same name, of which the game shows one) or not meant to show: leave it be
-                    // The exception is a piece this mod hid for an earlier style: it shows again
-                    // when a style wants it.
-                    let pieceShown: Bool = ArmSwapperPieceLook(comp, mesh, look) && ArmSwapperPieceMask(comp, mask)
-                        && (NotEquals(mask, 0ul) || (!piece.hide && memory.ArmSwapperHidForStyle(comp)));
-                    if pieceShown && (onlyFpp || onlyTpp) {
-                        // Barghest puts holstered meshes on the third person photo mode pieces, so
-                        // the piece name counts too
-                        let meshPath: String = ResRef.ToString(mesh);
-                        let thirdPerson: Bool = StrContains(meshPath, "_tpp") || StrContains(meshPath, "photomode") || StrContains(meshPath, "photo_mode")
-                            || StrContains(NameToString(comp.GetName()), "photomode");
-                        pieceShown = onlyTpp ? thirdPerson : !thirdPerson;
-                    }
-                    // The Barghest Mantis Blades (10, long sleeves 19) have only plain pieces in the
-                    // style data; the game adds its Barghest meshes another way. Keep those.
-                    if pieceShown && ArmSwapperIsBarghestStyle(armsType, index)
-                        && StrContains(ResRef.ToString(mesh), "\\pimp_chrome\\barghest\\")
-                        && !StrContains(ResRef.ToString(piece.mesh), "\\pimp_chrome\\barghest\\") {
-                        pieceShown = false;
-                    }
-                    // Monowire colour mods put their own whip meshes on the whip strands: a mesh from
-                    // outside the game's folders stays, with its look; the arm pieces still get the style
-                    if pieceShown && StrContains(NameToString(comp.GetName()), "monowire_whip_whip")
-                        && StrContains(ResRef.ToString(mesh), "\\") && !StrBeginsWith(ResRef.ToString(mesh), "base\\") && !StrBeginsWith(ResRef.ToString(mesh), "ep1\\") {
-                        pieceShown = false;
-                        ArmSwapperLog(game, "  piece " + NameToString(piece.comp) + " kept: whip mesh " + ResRef.ToString(mesh) + " from another mod");
-                    }
-                    // Female V's styles hide the holstered upper arms outside first person and show
-                    // photo mode upper arms in their place. Arm pieces from other mods (Split Cyberarm
-                    // Styles' pairs) may bring no such pieces: then the upper arms stay.
-                    if pieceShown && (piece.hide || Equals(piece.mask, 0ul)) && !Equals(view, n"hfpp")
-                        && StrContains(NameToString(comp.GetName()), "holstered_upperarm")
-                        && !ArmSwapperHasPhotoUpperArm(comps, StrContains(NameToString(comp.GetName()), "_left")) {
-                        pieceShown = false;
-                        ArmSwapperLog(game, "  piece " + NameToString(piece.comp) + " kept: no photo mode upper arm to replace it");
-                    }
-                    if pieceShown {
-                        found += 1;
-                        if piece.hide {
-                            // A plain-style piece this style leaves out
-                            if NotEquals(mask, 0ul) {
-                                ArmSwapperSetPieceMask(comp, 0ul);
-                                comp.RefreshAppearance();
-                                memory.ArmSwapperRememberHidForStyle(comp);
-                                memory.ArmSwapperNoteMask(comp, mask, 0ul);
-                                changed += 1;
-                                ArmSwapperLog(game, "  piece " + NameToString(piece.comp) + " hidden");
-                            }
-                        } else {
-                            // Pieces that wear V's skin tone take it from V's plain arm pieces (a style
-                            // mesh may show an uncoloured "default" look at this point)
-                            let wantLook: CName = piece.app;
-                            if piece.keepSkin {
-                                wantLook = NotEquals(skinTone, n"None") ? skinTone : look;
-                                // Style meshes often name the palest skin tone "default"
-                                if Equals(wantLook, n"01_ca_pale") && Equals(piece.app, n"default") {
-                                    wantLook = n"default";
-                                }
-                            }
-                            // The game puts V's skin tone on some plain arm pieces that the style data
-                            // lists with the "default" look (the left upper arm of the Mantis Blades).
-                            // Switching those to "default" on every draw made the left arm flicker:
-                            // keep V's skin on a plain arm mesh that stays the same. Only plain meshes: a
-                            // style's mesh (in a pimp_chrome folder) with a skin look draws like a plain
-                            // arm, which left holstered MaxTac-based blades unstyled after the MaxTac look
-                            // was switched off.
-                            let meshText: String = ResRef.ToString(mesh);
-                            if !piece.keepSkin && Equals(piece.app, n"default") && Equals(mesh, piece.mesh)
-                                && ArmSwapperIsSkinLook(look) && StrContains(meshText, "\\entities\\meshes\\")
-                                && !StrContains(meshText, "\\pimp_chrome\\") {
-                                wantLook = look;
-                            }
-                            // The game's own masks may set the top bit where the data does not;
-                            // that bit makes no difference, so it is not a change
-                            // Only chunks shown now, or hidden by this mod for a style, may show. Chunks
-                            // hidden by an item's hiding tag (KiasuBurger's cosmetic arms, luvwich's nails)
-                            // stay hidden.
-                            let allowed: Uint64 = mask | memory.ArmSwapperClearedChunks(comp);
-                            if Equals(allowed, 0ul) && memory.ArmSwapperHidForStyle(comp) { allowed = 18446744073709551615ul; }
-                            let wantMask: Uint64 = piece.mask & allowed;
-                            let maskChanged: Bool = NotEquals(mask | 9223372036854775808ul, wantMask | 9223372036854775808ul);
-                            if maskChanged {
-                                ArmSwapperSetPieceMask(comp, wantMask);
-                                memory.ArmSwapperNoteMask(comp, mask, wantMask);
-                                if Equals(mask, 0ul) { memory.ArmSwapperForgetHidForStyle(comp); }
-                                changed += 1;
-                                ArmSwapperLog(game, "  piece " + NameToString(piece.comp) + " chunk mask " + s"\(mask) -> \(wantMask)");
-                            }
-                            if NotEquals(piece.mask & ~allowed & 9223372036854775807ul, 0ul) {
-                                ArmSwapperLog(game, "  piece " + NameToString(piece.comp) + " keeps chunks hidden by another mod: " + s"\(piece.mask & ~allowed)");
-                            }
-                            // Other mods add variants of a mesh's looks named "<look>__<variant>" (Night City
-                            // Glamdoc Colors' finishes): on the same mesh such a variant counts as the look
-                            let sameLook: Bool = Equals(look, wantLook)
-                                || (Equals(mesh, piece.mesh) && StrBeginsWith(NameToString(look), NameToString(wantLook) + "__"));
-                            // One reload per piece. A new mesh is loaded once with its look and mask already
-                            // in place: a second reload (look or refresh) while the new mesh was still loading
-                            // could crash the game, which hit the Monowire arms, whose mask changes on most draws.
-                            if NotEquals(mesh, piece.mesh) {
-                                if !sameLook {
-                                    ArmSwapperSetPieceLook(comp, wantLook);
-                                    memory.ArmSwapperNoteAskedLook(comp, wantLook, now);
-                                }
-                                comp.ChangeResource(piece.mesh, true);
-                                changed += 1;
-                                ArmSwapperLog(game, "  piece " + NameToString(piece.comp) + " mesh " + ResRef.ToString(mesh) + " -> " + ResRef.ToString(piece.mesh)
-                                    + (sameLook ? "" : ", look " + NameToString(look) + " -> " + NameToString(wantLook)));
-                            } else {
-                                // Asked for this look a moment ago: it is on its way, don't reload it again
-                                if !sameLook && memory.ArmSwapperAskedLookLately(comp, wantLook, now) {
-                                    askedAlready += 1;
-                                } else if !sameLook {
-                                    comp.ChangeAppearance(wantLook, true);
-                                    memory.ArmSwapperNoteAskedLook(comp, wantLook, now);
-                                    changed += 1;
-                                    ArmSwapperLog(game, "  piece " + NameToString(piece.comp) + " look " + NameToString(look) + " -> " + NameToString(wantLook));
-                                } else if maskChanged {
-                                    comp.RefreshAppearance();
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    if changed > 0 {
-        ArmSwapperLog(game, "styled pieces (" + reason + ") for " + ArmSwapperName(arms) + ": " + NameToString(armsKey)
-            + (useElement ? " + " + NameToString(element) : "") + ", " + IntToString(changed) + " changes on " + IntToString(found) + " pieces");
-    }
-    if askedAlready > 0 {
-        ArmSwapperLog(game, "styled pieces (" + reason + "): " + IntToString(askedAlready) + " looks already asked for a moment ago, left to load");
-    }
-    // Copies of V (photo mode, inventory, Glamdoc preview): the Mantis Blades' own nail pieces go off
-    // under a Mantis style, as on V. These characters are built fresh, so nothing to bring back.
-    if owner != player && armsType == 1 && index > 0 {
-        for nailComp in comps {
-            if IsDefined(nailComp) && nailComp.IsEnabled() {
-                let copyNail: String = NameToString(nailComp.GetName());
-                if StrBeginsWith(copyNail, "a0_003_") && StrContains(copyNail, "mantisblade_nails") {
-                    nailComp.Toggle(false);
-                }
-            }
-        }
-    }
-    // The launcher comes out beside the melee arms, which keep their own nails and pieces
-    if owner == player && armsType > 0 {
-        // Leftover holstered Mantis hands while the blades are out (MaxTac-based blades after a style
-        // change): hide them until the blades are put away
-        if isOut && !isPreview && armsType == 1 {
-            ArmSwapperHideHolsteredWhileOut(player, comps);
-        }
-        // Painted-nail styles replace V's own nails; switch those off, and back on without one
-        ArmSwapperOwnNails(player, comps, armsType, index);
-        ArmSwapperCheckHead(player, "after styling, " + reason);
-    }
-    return changed;
-}
-
-// Whether a character shows a photo mode upper arm on one side
-@if(ModuleExists("Codeware"))
-public func ArmSwapperHasPhotoUpperArm(comps: array<ref<IComponent>>, left: Bool) -> Bool {
-    let side: String = left ? "_left" : "_right";
-    for comp in comps {
-        let mask: Uint64;
-        if IsDefined(comp) && ArmSwapperPieceMask(comp, mask) && NotEquals(mask, 0ul) {
-            let name: String = NameToString(comp.GetName());
-            if StrContains(name, "photomode_upperarm") && StrContains(name, side) { return true; }
-        }
-    }
-    return false;
-}
-
-@if(ModuleExists("Codeware"))
-public func ArmSwapperHideHolsteredWhileOut(player: ref<PlayerPuppet>, comps: array<ref<IComponent>>) {
-    let memory: ref<SimpleArmSwapperStyleMemory> = SimpleArmSwapperStyleMemory.Get(player.GetGame());
-    if !IsDefined(memory) { return; }
-    for comp in comps {
-        let mask: Uint64;
-        if IsDefined(comp) && ArmSwapperPieceMask(comp, mask) && NotEquals(mask, 0ul) {
-            let pieceName: String = NameToString(comp.GetName());
-            if StrBeginsWith(pieceName, "a0_003_") && StrContains(pieceName, "holstered") {
-                ArrayPush(memory.hiddenHolstered, comp);
-                ArrayPush(memory.hiddenMasks, mask);
-                ArmSwapperSetPieceMask(comp, 0ul);
-                comp.RefreshAppearance();
-                ArmSwapperLog(player.GetGame(), "  holstered piece " + pieceName + " hidden while the blades are out");
-            }
-        }
-    }
-}
-
-@if(!ModuleExists("Codeware"))
-public func ArmSwapperHideHolsteredWhileOut(player: ref<PlayerPuppet>, comps: array<ref<IComponent>>) {}
-
-// Barghest styles: Mantis Blades 10 (19 with long sleeves) and Monowire 7. The game's style data
-// lists only the plain pieces for them: the game adds the Barghest look through separate Phantom
-// Liberty parts, and only on arms it styles itself. These rows are taken from those parts
-// (ep1\characters\cyberware\player\a0_003__mantisblade\pimp_chrome\barghest\ and
-// ...\a0_002__monowire\pimp_chrome\barghest\) and replace the matching plain rows. They are not
-// produced by the style data generator.
-public func ArmSwapperAddBarghestPieces(out pieces: array<ref<ArmSwapperStylePiece>>) {
-    let news: array<ref<ArmSwapperStylePiece>>;
-    let all: Uint64 = 9223372036854775807ul;
-
-    // Monowire: every piece wears V's skin tone
-    let wireLeftHolstered: Uint64 = 18446744073709550079ul;
-    ArrayPush(news, ArmSwapperStylePieceNew(n"f_monowire_7_arms", n"a0_002_wa__monowire_whip_l_cableless", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_wa__monowire_whip_l_barghest.mesh", n"default", true, all, false));
-    ArrayPush(news, ArmSwapperStylePieceNew(n"f_monowire_7_arms", n"a0_002_wa__monowire_whip_r_cableless", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_wa__monowire_whip_r_barghest.mesh", n"default", true, all, false));
-    ArrayPush(news, ArmSwapperStylePieceNew(n"f_monowire_7_hfpp", n"a0_002_wa__monowire_whip_l_cableless", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_wa__monowire_whip_l_cableless_barghest.mesh", n"default", true, wireLeftHolstered, false));
-    ArrayPush(news, ArmSwapperStylePieceNew(n"f_monowire_7_hfpp", n"a0_002_wa__monowire_whip_r_cableless", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_wa__monowire_whip_r_barghest.mesh", n"default", true, all, false));
-    ArrayPush(news, ArmSwapperStylePieceNew(n"f_monowire_7_hfpp", n"a0_002_wa__monowire_whip_l_cableless5083", r"base\\characters\\cyberware\\player\\a0_002__monowire_whip\\a0_002_wa__monowire_whip_l_cableless.mesh", n"default", false, 0ul, true));
-    ArrayPush(news, ArmSwapperStylePieceNew(n"f_monowire_7_htpp", n"a0_002_wa__monowire_whip_l_cableless", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_wa__monowire_whip_l_tpp_barghest.mesh", n"default", true, all, false));
-    ArrayPush(news, ArmSwapperStylePieceNew(n"f_monowire_7_htpp", n"a0_002_wa__monowire_whip_r_cableless", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_wa__monowire_whip_r_tpp_barghest.mesh", n"default", true, all, false));
-    // male V's third person uses the holstered first person meshes, as the game does
-    ArrayPush(news, ArmSwapperStylePieceNew(n"m_monowire_7_arms", n"a0_002_ma__monowire_whip_l", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_ma__monowire_whip_l_barghest.mesh", n"default", true, all, false));
-    ArrayPush(news, ArmSwapperStylePieceNew(n"m_monowire_7_arms", n"a0_002_ma__monowire_whip_r", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_ma__monowire_whip_r_barghest.mesh", n"default", true, all, false));
-    for view in [n"m_monowire_7_hfpp", n"m_monowire_7_htpp"] {
-        ArrayPush(news, ArmSwapperStylePieceNew(view, n"a0_002_wa__monowire_whip_l_cableless", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_ma__monowire_whip_l_cableless_barghest.mesh", n"default", true, wireLeftHolstered, false));
-        ArrayPush(news, ArmSwapperStylePieceNew(view, n"a0_002_wa__monowire_whip_l_cableless4788", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_ma__monowire_whip_l_cableless_barghest.mesh", n"default", true, 18446744073709551104ul, false));
-        ArrayPush(news, ArmSwapperStylePieceNew(view, n"a0_002_wa__monowire_whip_r_cableless", r"ep1\\characters\\cyberware\\player\\a0_002__monowire\\pimp_chrome\\barghest\\meshes\\a0_002_ma__monowire_whip_r_barghest.mesh", n"default", true, all, false));
-    }
-
-    // Mantis Blades: chrome forearms and blades with their own looks; drawn, the plain upper arms
-    // stay. Put away, the upper arms are hidden, and with long sleeves (19) the hands are trimmed.
-    let blades: array<ref<ArmSwapperStylePiece>>;
-    ArrayPush(blades, ArmSwapperStylePieceNew(n"None", n"a0_003_wa__mantisblade_left_blade", r"ep1\\characters\\cyberware\\player\\a0_003__mantisblade\\pimp_chrome\\barghest\\entities\\meshes\\a0_003_wa__mantisblade_left_blade_barghest.mesh", n"default", false, all, false));
-    ArrayPush(blades, ArmSwapperStylePieceNew(n"None", n"a0_003_wa__mantisblade_right_blade", r"ep1\\characters\\cyberware\\player\\a0_003__mantisblade\\pimp_chrome\\barghest\\entities\\meshes\\a0_003_wa__mantisblade_right_blade_barghest.mesh", n"default", false, all, false));
-    let mechanisms: array<ref<ArmSwapperStylePiece>>;
-    ArrayPush(mechanisms, ArmSwapperStylePieceNew(n"None", n"a0_003_wa__mantisblade_left_mechanisms", r"ep1\\characters\\cyberware\\player\\a0_003__mantisblade\\pimp_chrome\\barghest\\entities\\meshes\\a0_003_wa__mantisblade_left_mechanisms_barghest.mesh", n"default", false, all, false));
-    ArrayPush(mechanisms, ArmSwapperStylePieceNew(n"None", n"a0_003_wa__mantisblade_left_mechanisms6263", r"ep1\\characters\\cyberware\\player\\a0_003__mantisblade\\pimp_chrome\\barghest\\entities\\meshes\\a0_003_wa__mantisblade_left_mechanisms_barghest.mesh", n"default", false, all, false));
-    ArrayPush(mechanisms, ArmSwapperStylePieceNew(n"None", n"a0_003_wa__mantisblade_right_mechanisms", r"ep1\\characters\\cyberware\\player\\a0_003__mantisblade\\pimp_chrome\\barghest\\entities\\meshes\\a0_003_wa__mantisblade_right_mechanisms_barghest.mesh", n"default", false, all, false));
-    ArrayPush(mechanisms, ArmSwapperStylePieceNew(n"None", n"a0_003_wa__mantisblade_right_mechanisms2035", r"ep1\\characters\\cyberware\\player\\a0_003__mantisblade\\pimp_chrome\\barghest\\entities\\meshes\\a0_003_wa__mantisblade_right_mechanisms_barghest.mesh", n"default", false, all, false));
-    let elements: array<String> = ["base", "chemical", "thermal", "electric"];
-    let bladeLooks: array<CName> = [n"default", n"toxic", n"thermal", n"electric"];
-    let wLeft: ResRef = r"ep1\\characters\\cyberware\\player\\a0_003__mantisblade\\pimp_chrome\\barghest\\entities\\meshes\\a0_003_wa__mantisblade_left_barghest.mesh";
-    let wRight: ResRef = r"ep1\\characters\\cyberware\\player\\a0_003__mantisblade\\pimp_chrome\\barghest\\entities\\meshes\\a0_003_wa__mantisblade_right_barghest.mesh";
-    let mLeft: ResRef = r"ep1\\characters\\cyberware\\player\\a0_003__mantisblade\\pimp_chrome\\barghest\\entities\\meshes\\a0_003_ma__mantisblade_left_barghest.mesh";
-    let mRight: ResRef = r"ep1\\characters\\cyberware\\player\\a0_003__mantisblade\\pimp_chrome\\barghest\\entities\\meshes\\a0_003_ma__mantisblade_right_barghest.mesh";
-    let wLeftHolstered: ResRef = r"ep1\\characters\\cyberware\\player\\a0_003__mantisblade\\pimp_chrome\\barghest\\entities\\meshes\\a0_003_wa__mantisblade_holstered_left_barghest.mesh";
-    let wRightHolstered: ResRef = r"ep1\\characters\\cyberware\\player\\a0_003__mantisblade\\pimp_chrome\\barghest\\entities\\meshes\\a0_003_wa__mantisblade_holstered_right_barghest.mesh";
-    let mLeftHolstered: ResRef = r"ep1\\characters\\cyberware\\player\\a0_003__mantisblade\\pimp_chrome\\barghest\\entities\\meshes\\a0_003_ma__mantisblade_holstered_left_barghest.mesh";
-    let mRightHolstered: ResRef = r"ep1\\characters\\cyberware\\player\\a0_003__mantisblade\\pimp_chrome\\barghest\\entities\\meshes\\a0_003_ma__mantisblade_holstered_right_barghest.mesh";
-    let wUpperLeft: ResRef = r"base\\characters\\cyberware\\player\\a0_003__mantisblade\\entities\\meshes\\a0_003_wa__mantisblade_holstered_upperarm_left.mesh";
-    let wUpperRight: ResRef = r"base\\characters\\cyberware\\player\\a0_003__mantisblade\\entities\\meshes\\a0_003_wa__mantisblade_holstered_upperarm_right.mesh";
-    let mUpperLeft: ResRef = r"base\\characters\\cyberware\\player\\a0_003__mantisblade\\entities\\meshes\\a0_003_ma__mantisblade_holstered_upperarm_left.mesh";
-    let mUpperRight: ResRef = r"base\\characters\\cyberware\\player\\a0_003__mantisblade\\entities\\meshes\\a0_003_ma__mantisblade_holstered_upperarm_right.mesh";
-    for index in [10, 19] {
-        let longSleeves: Bool = index == 19;
-        let f: String = "f_mantis_" + IntToString(index) + "_";
-        let m: String = "m_mantis_" + IntToString(index) + "_";
-        // drawn
-        ArrayPush(news, ArmSwapperStylePieceNew(StringToName(f + "arms"), n"a0_003_wa__mantisblade_left", wLeft, n"default", false, all, false));
-        ArrayPush(news, ArmSwapperStylePieceNew(StringToName(f + "arms"), n"a0_003_wa__mantisblade_right", wRight, n"default", false, all, false));
-        ArrayPush(news, ArmSwapperStylePieceNew(StringToName(m + "arms"), n"a0_003_ma__mantisblade_left", mLeft, n"default", false, all, false));
-        ArrayPush(news, ArmSwapperStylePieceNew(StringToName(m + "arms"), n"a0_003_ma__mantisblade_right", mRight, n"default", false, all, false));
-        let e: Int32 = 0;
-        while e < ArraySize(elements) {
-            for g in [f, m] {
-                let key: CName = StringToName(g + elements[e]);
-                for b in blades {
-                    ArrayPush(news, ArmSwapperStylePieceNew(key, b.comp, b.mesh, bladeLooks[e], false, all, false));
-                }
-                for mech in mechanisms {
-                    ArrayPush(news, ArmSwapperStylePieceNew(key, mech.comp, mech.mesh, n"default", false, all, false));
-                }
-            }
-            e += 1;
-        }
-        // put away: female V first person, female V third person (photo mode pieces), male V both.
-        // In third person the upper arms keep their plain rows: they are V's only upper arms there.
-        let fLeftMask: Uint64 = longSleeves ? 18446744073709551599ul : all;
-        let fRightMask: Uint64 = longSleeves ? 18446744073709551607ul : all;
-        let mLeftMask: Uint64 = longSleeves ? 18446744073709551599ul : all;
-        let mRightMask: Uint64 = longSleeves ? 18446744073709551583ul : all;
-        ArrayPush(news, ArmSwapperStylePieceNew(StringToName(f + "hfpp"), n"a0_003_wa__mantisblade_holstered_left", wLeftHolstered, n"default", false, fLeftMask, false));
-        ArrayPush(news, ArmSwapperStylePieceNew(StringToName(f + "hfpp"), n"a0_003_wa__mantisblade_holstered_right", wRightHolstered, n"default", false, fRightMask, false));
-        ArrayPush(news, ArmSwapperStylePieceNew(StringToName(f + "hfpp"), n"a0_003_wa__mantisblade_holstered_upperarm_left", wUpperLeft, n"default", false, 0ul, true));
-        ArrayPush(news, ArmSwapperStylePieceNew(StringToName(f + "hfpp"), n"a0_003_wa__mantisblade_holstered_upperarm_right", wUpperRight, n"default", false, 0ul, true));
-        ArrayPush(news, ArmSwapperStylePieceNew(StringToName(f + "htpp"), n"a0_003_wa__mantisblade_photomode_left2804", wLeftHolstered, n"default", false, fLeftMask, false));
-        ArrayPush(news, ArmSwapperStylePieceNew(StringToName(f + "htpp"), n"a0_003_wa__mantisblade_photomode_right", wRightHolstered, n"default", false, fRightMask, false));
-        for mv in ["hfpp", "htpp"] {
-            let key: CName = StringToName(m + mv);
-            ArrayPush(news, ArmSwapperStylePieceNew(key, n"a0_003_ma__mantisblade_holstered_left6562", mLeftHolstered, n"default", false, mLeftMask, false));
-            ArrayPush(news, ArmSwapperStylePieceNew(key, n"a0_003_ma__mantisblade_holstered_right", mRightHolstered, n"default", false, mRightMask, false));
-            // third person (photo mode) keeps the plain upper arms, as for female V
-            if Equals(mv, "hfpp") {
-                ArrayPush(news, ArmSwapperStylePieceNew(key, n"a0_003_ma__mantisblade_holstered_upperarm_left", mUpperLeft, n"default", false, 0ul, true));
-                ArrayPush(news, ArmSwapperStylePieceNew(key, n"a0_003_ma__mantisblade_holstered_upperarm_right", mUpperRight, n"default", false, 0ul, true));
-            }
-        }
-    }
-
-    // Replace: the whole plain Monowire 7 rows (but the third person personal link), and every
-    // other plain row that a Barghest row covers
-    let wholeKeys: array<CName> = [n"f_monowire_7_arms", n"f_monowire_7_hfpp", n"f_monowire_7_htpp",
-        n"m_monowire_7_arms", n"m_monowire_7_hfpp", n"m_monowire_7_htpp"];
-    let kept: array<ref<ArmSwapperStylePiece>>;
-    for p in pieces {
-        let drop: Bool = ArrayContains(wholeKeys, p.key) && NotEquals(p.comp, n"a0_001__personal_link_tpp4537");
-        if !drop {
-            for row in news {
-                if Equals(row.key, p.key) && Equals(row.comp, p.comp) { drop = true; }
-            }
-        }
-        if !drop { ArrayPush(kept, p); }
-    }
-    for row in news { ArrayPush(kept, row); }
-    pieces = kept;
-}
-
-// The Barghest style of each arm type (Mantis Blades also have a long-sleeve version)
-public func ArmSwapperIsBarghestStyle(armsType: Int32, index: Int32) -> Bool {
-    if armsType == 1 { return index == 10 || index == 19; }
-    if armsType == 2 { return index == 7; }
-    return false;
+    if !IsDefined(player) || !IsDefined(owner) || owner == player || !(new SimpleArmSwapperSettings()).stylePerArmType { return -1; }
+    if !ArmSwapperNativeStyling(player.GetGame()) { return -1; }
+    ArmSwapperHideStrayArms(player, owner, ArmSwapperArmsType(arms));
+    return -1;
 }
 
 // Styles that keep V's own nails: the plain style and the Barghest Monowire, whose hands are V's own
@@ -2871,15 +2321,279 @@ public func ArmSwapperOwnNails(player: ref<PlayerPuppet>, comps: array<ref<IComp
     }
 }
 
-// Whatever arms V now wears: leftover holstered Mantis Blade pieces only show while the Mantis
-// Blades themselves are put away, and Gorilla Arms hide V's own nails
+// ---------------------------------------------------------------------------
+// Native styling. The RED4ext plugin Simple Arm Swapper Native, shipped with the mod, lets the game
+// style every arm type itself, in every arm slot (its source and the reasoning are in the native
+// folder of the repository). Found through Codeware. When the plugin is missing or stays off (another
+// game version), arms outside the first arm slot keep their plain look and nothing is tidied.
+// ---------------------------------------------------------------------------
+
+@if(ModuleExists("Codeware"))
+public func ArmSwapperNativeStyling(game: GameInstance) -> Bool {
+    let memory: ref<SimpleArmSwapperStyleMemory> = SimpleArmSwapperStyleMemory.Get(game);
+    if !IsDefined(memory) { return false; }
+    if !memory.nativeChecked {
+        memory.nativeChecked = true;
+        memory.nativeVersion = 0;
+        let fn: ref<ReflectionStaticFunc> = Reflection.GetGlobalFunction(n"SimpleArmSwapperNativeVersion");
+        if IsDefined(fn) {
+            let ok: Bool = false;
+            let result: Variant = fn.Call([], ok);
+            if ok { memory.nativeVersion = FromVariant<Int32>(result); }
+        }
+        ArmSwapperLog(game, memory.nativeVersion > 0
+            ? "Simple Arm Swapper Native " + IntToString(memory.nativeVersion) + " found: the game styles every arm type itself"
+            : "Simple Arm Swapper Native not active: the mod styles arm pieces itself");
+    }
+    return memory.nativeVersion > 0;
+}
+
+@if(!ModuleExists("Codeware"))
+public func ArmSwapperNativeStyling(game: GameInstance) -> Bool {
+    return false;
+}
+
+// The arm type a piece belongs to, by its name: 0 Projectile Launch System, 1 Mantis Blades,
+// 2 Monowire, 3 Gorilla Arms, -1 for anything else
+public func ArmSwapperPieceArmsType(pieceName: String) -> Int32 {
+    if StrBeginsWith(pieceName, "a0_006_") { return 0; }
+    if StrBeginsWith(pieceName, "a0_003_") { return 1; }
+    if StrBeginsWith(pieceName, "a0_002_") { return 2; }
+    if StrBeginsWith(pieceName, "a0_005_") { return 3; }
+    return -1;
+}
+
+// Which chunks of a mesh piece show (0: none), or false for a piece that is not a mesh
+@if(ModuleExists("Codeware"))
+public func ArmSwapperPieceMask(comp: ref<IComponent>, out mask: Uint64) -> Bool {
+    let skinned: ref<entSkinnedMeshComponent> = comp as entSkinnedMeshComponent;
+    if IsDefined(skinned) { mask = skinned.chunkMask; return true; }
+    let plain: ref<MeshComponent> = comp as MeshComponent;
+    if IsDefined(plain) { mask = plain.chunkMask; return true; }
+    return false;
+}
+
+// A mesh piece's mesh and look, or false for a piece that is not a mesh
+@if(ModuleExists("Codeware"))
+public func ArmSwapperPieceLook(comp: ref<IComponent>, out mesh: ResRef, out look: CName) -> Bool {
+    let skinned: ref<entSkinnedMeshComponent> = comp as entSkinnedMeshComponent;
+    if IsDefined(skinned) {
+        let meshRef: ResourceAsyncRef = skinned.mesh;
+        mesh = ResourceAsyncRef.GetPath(meshRef);
+        look = skinned.meshAppearance;
+        return true;
+    }
+    let plain: ref<MeshComponent> = comp as MeshComponent;
+    if IsDefined(plain) {
+        let plainRef: ResourceAsyncRef = plain.mesh;
+        mesh = ResourceAsyncRef.GetPath(plainRef);
+        look = plain.meshAppearance;
+        return true;
+    }
+    return false;
+}
+
+// Whether a piece is on and shows at least part of its mesh. The game keeps some pieces on with
+// every chunk hidden (such as the inventory and photo mode upper arms), which show nothing.
+@if(ModuleExists("Codeware"))
+public func ArmSwapperPieceShows(comp: ref<IComponent>) -> Bool {
+    if !IsDefined(comp) || !comp.IsEnabled() { return false; }
+    let mask: Uint64;
+    if ArmSwapperPieceMask(comp, mask) { return NotEquals(mask, 0ul); }
+    return true;
+}
+
+// Whether a character's launcher pieces belong on it: it holds the launcher, or the launcher is the
+// only arm cyberware V has (then its put-away arm is V's arm)
+public func ArmSwapperLauncherBelongs(player: ref<PlayerPuppet>, owner: ref<Entity>, keepType: Int32) -> Bool {
+    if keepType == 0 || !ArmSwapperHasMeleeArms(player) { return true; }
+    let inLeft: ref<ItemObject> = GameInstance.GetTransactionSystem(player.GetGame()).GetItemInSlot(owner as GameObject, t"AttachmentSlots.WeaponLeft");
+    return IsDefined(inLeft) && ArmSwapperArmsType(inLeft.GetItemID()) == 0;
+}
+
+// With native styling: when an arm type's style changes while that type is shown on a character, the
+// game leaves the type's earlier pieces on it, beside whatever arms come next (seen with the Monowire
+// after the style calls at load, and as a stray Gorilla spike on the Glamdoc preview). Only pieces of
+// the melee type worn (keepType, in hand or put away) belong on a character, plus the launcher's
+// while it is out; the others are switched off. With keepType 0 (the launcher, or a character showing
+// it) melee pieces are left alone. On V hidden pieces are remembered and come back with their type,
+// unless the game has put a fresh copy on V meanwhile. Copies of V (Glamdoc preview, inventory, photo
+// mode) are built fresh.
+// The same effect within one type: each style change adds a fresh copy of that type's pieces and
+// keeps the old ones, so several copies of a piece (from different styles) show at once. Only the
+// newest copy of each piece stays. And with the Mantis Blades drawn, their put-away hands go until the
+// blades are put away (the numbered a0_003_ma__ pieces stay: they carry the painted-nail decals).
+@if(ModuleExists("Codeware"))
+public func ArmSwapperHideStrayArms(player: ref<PlayerPuppet>, owner: ref<Entity>, keepType: Int32, opt drawn: Bool) {
+    if !IsDefined(player) || !IsDefined(owner) || keepType < 0 || keepType > 3 { return; }
+    let game: GameInstance = player.GetGame();
+    let onV: Bool = owner == player;
+    let memory: ref<SimpleArmSwapperStyleMemory> = SimpleArmSwapperStyleMemory.Get(game);
+    if onV && !IsDefined(memory) { return; }
+    let launcherBelongs: Bool = ArmSwapperLauncherBelongs(player, owner, keepType);
+    let comps: array<ref<IComponent>> = owner.GetComponents();
+    if onV && ArraySize(memory.hiddenStray) > 0 {
+        let keptComps: array<wref<IComponent>>;
+        let keptTypes: array<Int32>;
+        let shown: Int32 = 0;
+        let i: Int32 = 0;
+        while i < ArraySize(memory.hiddenStray) {
+            let comp: ref<IComponent> = memory.hiddenStray[i];
+            let compType: Int32 = i < ArraySize(memory.hiddenStrayType) ? memory.hiddenStrayType[i] : -1;
+            if IsDefined(comp) {
+                if (compType == keepType && keepType >= 1) || (compType == 0 && launcherBelongs)
+                    || (compType == 11 && keepType == 1 && !drawn) {
+                    // Old copies among them are sorted out by the copy rule below
+                    comp.Toggle(true);
+                    shown += 1;
+                } else {
+                    ArrayPush(keptComps, comp);
+                    ArrayPush(keptTypes, compType);
+                }
+            }
+            i += 1;
+        }
+        memory.hiddenStray = keptComps;
+        memory.hiddenStrayType = keptTypes;
+        if shown > 0 {
+            ArmSwapperLog(game, "  " + IntToString(shown) + " hidden arm pieces shown again");
+        }
+    }
+    let hidden: Int32 = 0;
+    for comp in comps {
+        if IsDefined(comp) && comp.IsEnabled() {
+            let pieceType: Int32 = ArmSwapperPieceArmsType(NameToString(comp.GetName()));
+            let stray: Bool = false;
+            if pieceType == 0 { stray = !launcherBelongs; }
+            if pieceType >= 1 { stray = keepType >= 1 && pieceType != keepType; }
+            if stray {
+                comp.Toggle(false);
+                if onV {
+                    ArrayPush(memory.hiddenStray, comp);
+                    ArrayPush(memory.hiddenStrayType, pieceType);
+                }
+                hidden += 1;
+            }
+        }
+    }
+    if hidden > 0 {
+        ArmSwapperLog(game, "  hid " + IntToString(hidden) + " pieces of other arm types on " + (onV ? "V" : "a copy of V")
+            + " (arm type " + IntToString(keepType) + " worn, launcher out " + BoolToString(launcherBelongs) + ")");
+    }
+    // Mantis Blades drawn on V: their put-away hands go, remembered as type 11 until put away
+    let putAway: Int32 = 0;
+    if onV && keepType == 1 && drawn {
+        for comp in comps {
+            if IsDefined(comp) && comp.IsEnabled() && StrBeginsWith(NameToString(comp.GetName()), "a0_003_wa__mantisblade_holstered") {
+                comp.Toggle(false);
+                ArrayPush(memory.hiddenStray, comp);
+                ArrayPush(memory.hiddenStrayType, 11);
+                putAway += 1;
+            }
+        }
+    }
+    // Several copies of one Mantis Blade or launcher piece from different styles (another mesh or
+    // look): the newest (last listed) stays. Copies with the same mesh and look are parts of one piece,
+    // and copies with every chunk hidden are the game's own; both are left alone. Not the Gorilla Arms:
+    // they build their photo mode arms from several same-named parts, styled and skin meshes mixed.
+    let names: array<CName>;
+    let meshes: array<ResRef>;
+    let looks: array<CName>;
+    let i: Int32 = 0;
+    while i < ArraySize(comps) {
+        let comp: ref<IComponent> = comps[i];
+        let mesh: ResRef;
+        let look: CName;
+        let copyType: Int32 = ArmSwapperPieceArmsType(NameToString(comp.GetName()));
+        if ArmSwapperPieceShows(comp) && (copyType == 1 || copyType == 0) && ArmSwapperPieceLook(comp, mesh, look) {
+            let at: Int32 = ArrayFindFirst(names, comp.GetName());
+            if at < 0 {
+                ArrayPush(names, comp.GetName());
+                ArrayPush(meshes, mesh);
+                ArrayPush(looks, look);
+            } else {
+                meshes[at] = mesh;
+                looks[at] = look;
+            }
+        }
+        i += 1;
+    }
+    let oldCopies: Int32 = 0;
+    i = 0;
+    while i < ArraySize(comps) {
+        let comp: ref<IComponent> = comps[i];
+        let mesh: ResRef;
+        let look: CName;
+        if ArmSwapperPieceShows(comp) && ArmSwapperPieceLook(comp, mesh, look) {
+            let at: Int32 = ArrayFindFirst(names, comp.GetName());
+            if at >= 0 && (NotEquals(mesh, meshes[at]) || NotEquals(look, looks[at])) {
+                comp.Toggle(false);
+                oldCopies += 1;
+            }
+        }
+        i += 1;
+    }
+    if putAway > 0 || oldCopies > 0 {
+        ArmSwapperLog(game, "  hid " + IntToString(putAway) + " put-away Mantis pieces while drawn, " + IntToString(oldCopies)
+            + " old copies of Mantis or launcher pieces on " + (onV ? "V" : "a copy of V"));
+    }
+}
+
+@if(!ModuleExists("Codeware"))
+public func ArmSwapperHideStrayArms(player: ref<PlayerPuppet>, owner: ref<Entity>, keepType: Int32, opt drawn: Bool) {}
+
+// Tidies V for the arms she wears now, over the next few seconds (native styling only)
+public func ArmSwapperTidyWornNow(player: ref<PlayerPuppet>, why: String) {
+    if !IsDefined(player) || !ArmSwapperNativeStyling(player.GetGame()) { return; }
+    let holstered: Bool;
+    let wornType: Int32 = ArmSwapperWornMeleeType(player, holstered);
+    // Only the launcher out (melee arms leave the arm slot meanwhile), or the launcher alone
+    if wornType < 0 && ArmSwapperLauncherBelongs(player, player, -1) && ItemID.IsValid(ArmSwapperEquippedArmsOfType(player, 0)) {
+        wornType = 0;
+    }
+    if wornType < 0 { return; }
+    ArmSwapperLog(player.GetGame(), "tidying worn arms (" + why + "), arm type " + IntToString(wornType));
+    ArmSwapperTidyWornSoon(player, wornType, holstered, true);
+}
+
+// The melee arm type V wears right now, in hand or put away (-1 for none), and whether it is put away
+public func ArmSwapperWornMeleeType(player: ref<PlayerPuppet>, out holstered: Bool) -> Int32 {
+    holstered = false;
+    if !IsDefined(player) { return -1; }
+    let ts: ref<TransactionSystem> = GameInstance.GetTransactionSystem(player.GetGame());
+    let inHand: ref<ItemObject> = ts.GetItemInSlot(player, t"AttachmentSlots.WeaponRight");
+    if IsDefined(inHand) {
+        let handType: Int32 = ArmSwapperArmsType(inHand.GetItemID());
+        if handType >= 1 && handType <= 3 { return handType; }
+    }
+    let putAway: ref<ItemObject> = ts.GetItemInSlot(player, t"AttachmentSlots.RightArm");
+    if IsDefined(putAway) {
+        let awayType: Int32 = ArmSwapperArmsType(ArmSwapperArmsForHolstered(player, putAway.GetItemID()));
+        if awayType >= 1 && awayType <= 3 {
+            holstered = true;
+            return awayType;
+        }
+    }
+    return -1;
+}
+
+// Whatever arms V now wears: other arm types' leftover pieces go (native styling), and Gorilla Arms
+// and painted-nail styles hide V's own nails
 @if(ModuleExists("Codeware"))
 public func ArmSwapperTidyWorn(player: ref<PlayerPuppet>, armsType: Int32, holstered: Bool) {
     if !IsDefined(player) || !(new SimpleArmSwapperSettings()).stylePerArmType { return; }
-    let comps: array<ref<IComponent>> = player.GetComponents();
-    if !(armsType == 1 && holstered) {
-        ArmSwapperHideHolsteredWhileOut(player, comps);
+    if ArmSwapperNativeStyling(player.GetGame()) {
+        // Passes are queued for a few seconds after arms appear, and the arms can be drawn or put away
+        // meanwhile: tidy for what V wears when the pass runs
+        let nowHolstered: Bool;
+        let nowType: Int32 = ArmSwapperWornMeleeType(player, nowHolstered);
+        if nowType >= 1 {
+            ArmSwapperHideStrayArms(player, player, nowType, !nowHolstered);
+        } else {
+            ArmSwapperHideStrayArms(player, player, armsType, !holstered);
+        }
     }
+    let comps: array<ref<IComponent>> = player.GetComponents();
     // V's own nails: off under Gorilla Arms and painted-nail styles, on otherwise
     let index: Int32 = 0;
     let memory: ref<SimpleArmSwapperStyleMemory> = SimpleArmSwapperStyleMemory.Get(player.GetGame());
@@ -2910,10 +2624,13 @@ public class ArmSwapperTidyCallback extends DelayCallback {
     }
 }
 
-public func ArmSwapperTidyWornSoon(player: ref<PlayerPuppet>, armsType: Int32, holstered: Bool) {
+public func ArmSwapperTidyWornSoon(player: ref<PlayerPuppet>, armsType: Int32, holstered: Bool, opt longer: Bool) {
     if !IsDefined(player) { return; }
     ArmSwapperTidyWorn(player, armsType, holstered);
     let delays: array<Float> = [0.1, 0.4, 1.0];
+    if longer {
+        delays = [0.3, 1.0, 2.0, 3.5];
+    }
     for delay in delays {
         let callback: ref<ArmSwapperTidyCallback> = new ArmSwapperTidyCallback();
         callback.player = player;
@@ -2923,50 +2640,6 @@ public func ArmSwapperTidyWornSoon(player: ref<PlayerPuppet>, armsType: Int32, h
         GameInstance.GetDelaySystem(player.GetGame()).DelayCallback(callback, delay, false);
     }
 }
-
-// Shows the holstered pieces hidden while the blades were out, as they were. When the game has put
-// a fresh copy of a piece on V meanwhile (a style change, the MaxTac look switching), the old copy
-// stays hidden: showing it too stacked copies of the same hand in different styles, more with
-// every draw.
-@if(ModuleExists("Codeware"))
-public func ArmSwapperShowHiddenHolstered(player: ref<PlayerPuppet>) {
-    let memory: ref<SimpleArmSwapperStyleMemory> = SimpleArmSwapperStyleMemory.Get(player.GetGame());
-    if !IsDefined(memory) || ArraySize(memory.hiddenHolstered) == 0 { return; }
-    // Names of holstered pieces the game shows now, other than the ones this mod hid
-    let freshNames: array<CName>;
-    for comp in player.GetComponents() {
-        let mask: Uint64;
-        if IsDefined(comp) && ArmSwapperPieceMask(comp, mask) && NotEquals(mask, 0ul) {
-            let mine: Bool = false;
-            for hidden in memory.hiddenHolstered {
-                if hidden == comp { mine = true; }
-            }
-            if !mine && !ArrayContains(freshNames, comp.GetName()) { ArrayPush(freshNames, comp.GetName()); }
-        }
-    }
-    let shown: Int32 = 0;
-    let kept: Int32 = 0;
-    let i: Int32 = 0;
-    while i < ArraySize(memory.hiddenHolstered) {
-        let comp: ref<IComponent> = memory.hiddenHolstered[i];
-        if IsDefined(comp) && i < ArraySize(memory.hiddenMasks) {
-            if ArrayContains(freshNames, comp.GetName()) {
-                kept += 1;
-            } else {
-                ArmSwapperSetPieceMask(comp, memory.hiddenMasks[i]);
-                comp.RefreshAppearance();
-                shown += 1;
-            }
-        }
-        i += 1;
-    }
-    ArmSwapperLog(player.GetGame(), "  " + IntToString(shown) + " holstered pieces shown again, " + IntToString(kept) + " old copies left hidden");
-    ArrayClear(memory.hiddenHolstered);
-    ArrayClear(memory.hiddenMasks);
-}
-
-@if(!ModuleExists("Codeware"))
-public func ArmSwapperShowHiddenHolstered(player: ref<PlayerPuppet>) {}
 
 @if(!ModuleExists("Codeware"))
 public func ArmSwapperStylePiecesOf(player: ref<PlayerPuppet>, owner: ref<Entity>, arms: ItemID, reason: String, opt view: CName, opt styleOverride: ItemID) -> Int32 {
@@ -3003,7 +2676,8 @@ public class ArmSwapperStylePiecesCallback extends DelayCallback {
 
 // Styles now and again over the next moment, while the given item stays in the given slot
 public func ArmSwapperStylePiecesSoon(player: ref<PlayerPuppet>, target: ref<Entity>, arms: ItemID, view: CName, slot: TweakDBID, slotItem: ItemID, opt longer: Bool) {
-    if !IsDefined(player) || !IsDefined(target) || ArmSwapperArmsType(arms) < 0 { return; }
+    // V is styled by the game and tidied in ArmSwapperTidyWorn; only copies of V are looked at here
+    if !IsDefined(player) || !IsDefined(target) || target == player || ArmSwapperArmsType(arms) < 0 { return; }
     ArmSwapperStylePiecesOf(player, target, arms, "attached", view);
     let delays: array<Float> = [0.05, 0.25, 0.75];
     if longer {
@@ -3024,25 +2698,12 @@ public func ArmSwapperStylePiecesSoon(player: ref<PlayerPuppet>, target: ref<Ent
     }
 }
 
-// Restyles the arms V wears right now, in hand or put away, over the next few seconds
+// Getting on or off a vehicle, or switching its camera, rebuilds V's arm pieces without the arms
+// being attached again: tidy them again
 public func ArmSwapperRestyleWorn(player: ref<PlayerPuppet>, why: String) {
     if !IsDefined(player) || !(new SimpleArmSwapperSettings()).stylePerArmType { return; }
-    let eqData: ref<EquipmentSystemPlayerData> = EquipmentSystem.GetData(player);
-    if !IsDefined(eqData) { return; }
-    let arms: ItemID = eqData.GetActiveMeleeWare();
-    if ArmSwapperArmsType(arms) < 1 { return; }
-    ArmSwapperLog(player.GetGame(), "restyling worn arms (" + why + ") for " + ArmSwapperName(arms));
     ArmSwapperCheckHeadSoon(player, why);
-    let ts: ref<TransactionSystem> = GameInstance.GetTransactionSystem(player.GetGame());
-    let inHand: ref<ItemObject> = ts.GetItemInSlot(player, t"AttachmentSlots.WeaponRight");
-    if IsDefined(inHand) && inHand.GetItemID() == arms {
-        ArmSwapperStylePiecesSoon(player, player, arms, n"out", t"AttachmentSlots.WeaponRight", arms, true);
-    }
-    let holstered: ref<ItemObject> = ts.GetItemInSlot(player, t"AttachmentSlots.RightArm");
-    if IsDefined(holstered) && ArmSwapperArmsForHolstered(player, holstered.GetItemID()) == arms {
-        ArmSwapperStylePiecesSoon(player, player, arms, n"hfppAuto", t"AttachmentSlots.RightArm", holstered.GetItemID(), true);
-        ArmSwapperStylePiecesSoon(player, player, arms, n"htppAuto", t"AttachmentSlots.RightArm", holstered.GetItemID(), true);
-    }
+    ArmSwapperTidyWornNow(player, why);
 }
 
 // Getting on or off a vehicle rebuilds V's arm pieces without the arms being attached again
@@ -3064,6 +2725,52 @@ protected final func OnVehicleCameraChange(state: Bool) -> Void {
 protected cb func OnUnmountingEvent(evt: ref<UnmountingEvent>) -> Bool {
     let result: Bool = wrappedMethod(evt);
     ArmSwapperRestyleWorn(this, "unmounting");
+    return result;
+}
+
+// Changing the top can switch long sleeves on or off. The game then re-sends the style of the arms in
+// use; with native styling the other arm types' styles are set again too (their long-sleeve
+// versions), and V is tidied, a moment later.
+public func ArmSwapperTopChanged(player: ref<PlayerPuppet>, slot: TweakDBID) {
+    if !IsDefined(player) || !(slot == t"AttachmentSlots.Torso" || slot == t"AttachmentSlots.Chest" || slot == t"AttachmentSlots.Outfit") { return; }
+    if !(new SimpleArmSwapperSettings()).stylePerArmType || !ArmSwapperNativeStyling(player.GetGame()) { return; }
+    // While a save loads the clothes go on too; the pass after loading covers that (styles set
+    // mid-load brought V's hair into first person)
+    if ArmSwapperNow(player.GetGame()) - player.m_armSwapperAttachTime < 15.0 { return; }
+    // One pass for a burst of changes (an outfit swaps several pieces)
+    player.m_armSwapperTopGen += 1;
+    let later: ref<ArmSwapperTopChangedCallback> = new ArmSwapperTopChangedCallback();
+    later.player = player;
+    later.gen = player.m_armSwapperTopGen;
+    GameInstance.GetDelaySystem(player.GetGame()).DelayCallback(later, 1.0, false);
+}
+
+@addField(PlayerPuppet)
+public let m_armSwapperTopGen: Int32;
+
+public class ArmSwapperTopChangedCallback extends DelayCallback {
+    public let player: wref<PlayerPuppet>;
+    public let gen: Int32;
+
+    public func Call() -> Void {
+        let player: ref<PlayerPuppet> = this.player;
+        if !IsDefined(player) || this.gen != player.m_armSwapperTopGen { return; }
+        let system: ref<CyberwareCustomizationSystem> = GameInstance.GetScriptableSystemsContainer(player.GetGame()).Get(n"CyberwareCustomizationSystem") as CyberwareCustomizationSystem;
+        if IsDefined(system) { system.ArmSwapperSetAllSwitchersLater("top changed", 0.0); }
+    }
+}
+
+@wrapMethod(PlayerPuppet)
+protected cb func OnItemAddedToSlot(evt: ref<ItemAddedToSlot>) -> Bool {
+    let result: Bool = wrappedMethod(evt);
+    ArmSwapperTopChanged(this, evt.GetSlotID());
+    return result;
+}
+
+@wrapMethod(PlayerPuppet)
+protected cb func OnItemRemovedFromSlot(evt: ref<ItemRemovedFromSlot>) -> Bool {
+    let result: Bool = wrappedMethod(evt);
+    ArmSwapperTopChanged(this, evt.GetSlotID());
     return result;
 }
 
@@ -3173,7 +2880,6 @@ public func ArmSwapperGorillaNails(player: ref<PlayerPuppet>, owner: ref<GameObj
             }
             ArrayClear(memory.hiddenNailSlots);
             ArrayClear(memory.hiddenNailItems);
-            memory.hiddenNailsHideMonowire = false;
             ArmSwapperLog(player.GetGame(), "nail items put back");
         }
         return;
@@ -3186,12 +2892,10 @@ public func ArmSwapperGorillaNails(player: ref<PlayerPuppet>, owner: ref<GameObj
         }
         if IsDefined(nails) && ArmSwapperIsNailItem(nails) {
             let nailItem: ItemID = nails.GetItemID();
-            let hidesMonowire: Bool = ArmSwapperHidesMonowire(nails);
             ts.RemoveItemFromSlot(owner, slot);
             if owner == player {
                 ArrayPush(memory.hiddenNailSlots, slot);
                 ArrayPush(memory.hiddenNailItems, nailItem);
-                if hidesMonowire { memory.hiddenNailsHideMonowire = true; }
             }
             ArmSwapperLog(player.GetGame(), "nail item " + ArmSwapperName(nailItem) + " taken off " + TDBID.ToStringDEBUG(slot) + " under Gorilla Arms");
         }
@@ -3267,51 +2971,7 @@ public class ArmSwapperLauncherSlotCallback extends AttachmentSlotsScriptCallbac
         if ArmSwapperNailsMatter(slot) {
             ArmSwapperGorillaNailsSoon(system.ArmSwapperPlayer());
         }
-        // A nail item came off: once the game has dropped its hiding tag, the Monowire gets its style
-        // again (if the item was one that kept it plain). Not under Gorilla Arms, where the mod itself
-        // takes nail items off and puts them back afterwards.
-        if slot == t"OutfitSlots.FingernailsLeft" || slot == t"OutfitSlots.FingernailsRight" {
-            let player: ref<PlayerPuppet> = system.ArmSwapperPlayer();
-            let eqData: ref<EquipmentSystemPlayerData> = IsDefined(player) ? EquipmentSystem.GetData(player) : null;
-            if IsDefined(eqData) && ArmSwapperArmsType(eqData.GetActiveMeleeWare()) == 2 {
-                let later: ref<ArmSwapperRestyleLaterCallback> = new ArmSwapperRestyleLaterCallback();
-                later.player = player;
-                later.why = "nail item taken off";
-                GameInstance.GetDelaySystem(player.GetGame()).DelayCallback(later, 1.0, false);
-            }
-        }
     }
-}
-
-public class ArmSwapperRestyleLaterCallback extends DelayCallback {
-    public let player: wref<PlayerPuppet>;
-    public let why: String;
-
-    public func Call() -> Void {
-        let player: ref<PlayerPuppet> = this.player;
-        if IsDefined(player) { ArmSwapperRestyleWorn(player, this.why); }
-    }
-}
-
-// Nail items whose hiding tag reaches into the Monowire's arm pieces: luvwich's manicures hide part 2
-// of them, which is the fingernails on the plain Monowire but part of the arm on its styles. With such
-// an item on, the game puts the tag's hiding back after every change to those pieces, and changing them
-// as well could crash the game. The Monowire is then left to the game (plain shape, style colours).
-public func ArmSwapperHidesMonowire(item: ref<ItemObject>) -> Bool {
-    return IsDefined(item) && item.MatchVisualTag(n"lw_hide_basegame_nails");
-}
-
-public func ArmSwapperMonowireNailsWorn(player: ref<PlayerPuppet>, owner: ref<GameObject>) -> Bool {
-    if !IsDefined(player) { return false; }
-    let ts: ref<TransactionSystem> = GameInstance.GetTransactionSystem(player.GetGame());
-    let slots: array<TweakDBID> = [t"OutfitSlots.FingernailsLeft", t"OutfitSlots.FingernailsRight"];
-    for slot in slots {
-        if ArmSwapperHidesMonowire(ts.GetItemInSlot(player, slot)) { return true; }
-        if IsDefined(owner) && owner != player && ArmSwapperHidesMonowire(ts.GetItemInSlot(owner, slot)) { return true; }
-    }
-    // Taken off for Gorilla Arms, and coming back with the next arms
-    let memory: ref<SimpleArmSwapperStyleMemory> = SimpleArmSwapperStyleMemory.Get(player.GetGame());
-    return IsDefined(memory) && memory.hiddenNailsHideMonowire;
 }
 
 // The launcher's style switcher stays off V while melee arms are equipped. Setting it adds the
@@ -3321,6 +2981,9 @@ public func ArmSwapperMonowireNailsWorn(player: ref<PlayerPuppet>, owner: ref<Ga
 @addMethod(CyberwareCustomizationSystem)
 public func ArmSwapperHoldsBackSwitcher(switcherName: CName) -> Bool {
     if !Equals(switcherName, n"launcher") || !(new SimpleArmSwapperSettings()).stylePerArmType { return false; }
+    // With native styling the game styles the launcher beside melee arms too; its stray pieces are
+    // tidied away while it is put away (ArmSwapperHideStrayArms)
+    if ArmSwapperNativeStyling(this.GetGameInstance()) { return false; }
     // The Glamdoc's launcher tab needs it to show the launcher on its preview character. The
     // pieces it leaves behind are hidden on menu characters (ArmSwapperHideStrayLauncher).
     let memory: ref<SimpleArmSwapperStyleMemory> = SimpleArmSwapperStyleMemory.Get(this.GetGameInstance());
@@ -3424,7 +3087,7 @@ public func ArmSwapperLauncherOut(launcher: ItemID) {
     if !ArmSwapperHasMeleeArms(player) { return; }
     ArmSwapperLog(this.GetGameInstance(), "launcher out beside melee arms: " + ArmSwapperName(launcher) + ". " + ArmSwapperArmsState(player));
     this.ArmSwapperLauncherColours(true);
-    ArmSwapperStylePiecesSoon(player, player, launcher, n"out", t"AttachmentSlots.WeaponLeft", launcher);
+    ArmSwapperTidyWornNow(player, "launcher out");
     ArmSwapperDumpLauncherSoon(player);
 }
 
@@ -3432,6 +3095,11 @@ public func ArmSwapperLauncherOut(launcher: ItemID) {
 public func ArmSwapperLauncherAway(launcher: ItemID) {
     ArmSwapperLog(this.GetGameInstance(), "launcher away: " + ArmSwapperName(launcher));
     this.ArmSwapperLauncherColours(false);
+    let player: ref<PlayerPuppet> = this.ArmSwapperPlayer();
+    let memory: ref<SimpleArmSwapperStyleMemory> = SimpleArmSwapperStyleMemory.Get(this.GetGameInstance());
+    if IsDefined(player) && !(IsDefined(memory) && memory.glamdocOpen) && (new SimpleArmSwapperSettings()).stylePerArmType {
+        ArmSwapperTidyWornNow(player, "launcher away");
+    }
 }
 
 // Debug: the pieces of the launcher item itself, once it is in V's hand
@@ -3444,6 +3112,7 @@ public class ArmSwapperLauncherDumpCallback extends DelayCallback {
         let launcher: ref<ItemObject> = GameInstance.GetTransactionSystem(player.GetGame()).GetItemInSlot(player, t"AttachmentSlots.WeaponLeft");
         if IsDefined(launcher) {
             ArmSwapperDumpMeshes(player.GetGame(), launcher, "launcher item");
+            ArmSwapperDumpMeshes(player.GetGame(), player, "V with launcher out");
         }
     }
 }
@@ -3452,7 +3121,8 @@ public func ArmSwapperDumpLauncherSoon(player: ref<PlayerPuppet>) {
     if !(new SimpleArmSwapperSettings()).debugLogging || !IsDefined(player) { return; }
     let callback: ref<ArmSwapperLauncherDumpCallback> = new ArmSwapperLauncherDumpCallback();
     callback.player = player;
-    GameInstance.GetDelaySystem(player.GetGame()).DelayCallback(callback, 0.5, false);
+    // After the tidy passes (up to 3.5 s)
+    GameInstance.GetDelaySystem(player.GetGame()).DelayCallback(callback, 4.0, false);
 }
 
 // Photo mode builds its own copy of V; its holstered arms use the third person pieces
