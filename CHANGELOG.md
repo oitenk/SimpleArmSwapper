@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.0.1
+
+The Nexus download now includes Simple Arm Swapper Native, the small plugin that lets every arm type keep its Glamdoc style. It was missing from the 3.0.0 file on Nexus, so arms outside the first arm slot (often the Projectile Launch System) showed their plain look. Update and your styles show on all your arms. Thank you to the player who reported it and helped track it down!
+
 ## 3.0.0
 
 NEW! Glamdoc styles now show on all your arm cyberware, in every arm slot. The game does the styling itself now, through a small plugin that comes with the mod.

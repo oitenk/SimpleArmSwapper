@@ -1,6 +1,6 @@
 # Uploads a new version of the mod's main file to Nexus Mods.
 #
-# Runs only when started by hand from the Actions tab. It zips the r6 folder,
+# Runs only when started by hand from the Actions tab. It zips the r6 and red4ext folders,
 # takes that version's notes from CHANGELOG.md, and adds the zip as a new
 # version of the main file on the mod page.
 #
@@ -88,8 +88,13 @@ jobs:
         env:
           ZIP_NAME: ${{ steps.package.outputs.zip_name }}
         run: |
-          zip -r "$ZIP_NAME" r6
+          zip -r "$ZIP_NAME" r6 red4ext
           unzip -l "$ZIP_NAME"
+          # Stop if the native plugin did not make it into the zip.
+          if ! unzip -l "$ZIP_NAME" | grep -q 'red4ext/plugins/SimpleArmSwapperNative/SimpleArmSwapperNative.dll'; then
+            echo "::error::SimpleArmSwapperNative.dll is missing from the zip"
+            exit 1
+          fi
 
       - name: Upload to Nexus Mods
         # v1.0.0-beta.10
