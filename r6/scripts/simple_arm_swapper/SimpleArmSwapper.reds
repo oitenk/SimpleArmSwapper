@@ -1,5 +1,5 @@
 // r6/scripts/simple_arm_swapper/SimpleArmSwapper.reds
-// Simple Arm Swapper v3.0.1
+// Simple Arm Swapper v3.0.2
 
 // Other mods can detect this one with @if(ModuleExists("SimpleArmSwapperMod"))
 module SimpleArmSwapperMod
@@ -7,7 +7,7 @@ module SimpleArmSwapperMod
 @if(ModuleExists("Codeware.Localization"))
 import Codeware.Localization.*
 
-public func Version() -> String = "3.0.1"
+public func Version() -> String = "3.0.2"
 
 // Options shown in the Mod Settings menu. Mod Settings is optional: when it is installed it
 // writes the saved choice into this class's default values (at startup and whenever the
@@ -1139,7 +1139,7 @@ public func ArmSwapperApplyStyleFor(armsItem: ItemID, opt fromGlamdoc: Bool) {
             ArmSwapperCheckHeadSoon(player, "after style switcher reset");
         }
         let noColor: Color;
-        this.SetCustomizationParameters(false, noColor, noColor);
+        this.ArmSwapperPaint(false, noColor, noColor, n"noStyle");
         EquipmentSystem.GetData(player).ArmSwapperSyncStyleItem(ItemID.None());
         ArmSwapperLog(this.GetGameInstance(), "apply for " + ArmSwapperName(armsItem) + ": no style of its own, switcher " + NameToString(ownSwitcher) + " reset, colours off. " + ArmSwapperArmsState(player));
         return;
@@ -1185,8 +1185,7 @@ public func ArmSwapperApplyStyleFor(armsItem: ItemID, opt fromGlamdoc: Bool) {
         // Every type's switcher was set once already (ArmSwapperSetAllSwitchers), so a swap only
         // changes the colours. Sending the style switch on every swap, while the arms were still
         // changing, could crash the game.
-        this.SetCustomizationParameters(this.savedData.enabled, Color.ToLinear(CyberwareCustomizationPersistentData.GetPrimaryColor(this.savedData)),
-            Color.ToLinear(CyberwareCustomizationPersistentData.GetSecondaryColor(this.savedData)));
+        this.ArmSwapperPaintSaved(n"swap");
         EquipmentSystem.GetData(player).ArmSwapperSyncStyleItem(styleItem);
         ArmSwapperLog(this.GetGameInstance(), "colours for " + ArmSwapperName(armsItem) + ": " + ArmSwapperStyleDataText(this.savedData));
         return;
@@ -1236,7 +1235,8 @@ private final func OnSaveAndApplyCyberwareCustomizationDataRequest(request: ref<
     // ripperdoc): set every type's switcher again a moment later
     let changeMemory: ref<SimpleArmSwapperStyleMemory> = SimpleArmSwapperStyleMemory.Get(this.GetGameInstance());
     if IsDefined(changeMemory) && !changeMemory.glamdocOpen && (new SimpleArmSwapperSettings()).stylePerArmType {
-        this.ArmSwapperSetAllSwitchersLater("style changed outside the Glamdoc", 1.5);
+        // (3 s: leaving a ripperdoc, the game is still rebuilding V for a moment)
+        this.ArmSwapperSetAllSwitchersLater("style changed outside the Glamdoc", 3.0);
     }
 }
 
@@ -1257,6 +1257,10 @@ private final func PlayerAttachedCallback(playerPuppet: ref<GameObject>) {
     let attached: ref<PlayerPuppet> = playerPuppet as PlayerPuppet;
     if IsDefined(attached) { attached.m_armSwapperAttachTime = ArmSwapperNow(attached.GetGame()); }
     this.m_armSwapperLauncherColoursOn = false;
+    // A pass still waiting from before the load is dropped; the load's own pass follows below
+    this.m_armSwapperSwitchersDue = 0.0;
+    this.m_armSwapperSwitchersWhy = "";
+    this.m_armSwapperSwitchersGen += 1;
     this.ArmSwapperListenForLauncher(playerPuppet);
     ArmSwapperStartHeadWatch(attached);
     this.ArmSwapperRememberCurrentStyle();
@@ -1268,33 +1272,86 @@ private final func PlayerAttachedCallback(playerPuppet: ref<GameObject>) {
     }
 }
 
+// One switcher pass waits at a time. Requests that come in while it waits (leaving a ripperdoc
+// sends several within a second, while the game is still rebuilding V) join it and push it back,
+// so the switchers are set once, after things have gone quiet. Setting them several times in a
+// row while V was being rebuilt could crash the game.
+@addField(CyberwareCustomizationSystem)
+private let m_armSwapperSwitchersDue: Float;
+
+@addField(CyberwareCustomizationSystem)
+private let m_armSwapperSwitchersWhy: String;
+
+// Only the newest waiting callback may run the pass; older ones see a different number and stop
+@addField(CyberwareCustomizationSystem)
+private let m_armSwapperSwitchersGen: Int32;
+
 // Sets every arm type's switcher after the given delay, once no swap is settling and the Glamdoc is closed
 @addMethod(CyberwareCustomizationSystem)
 public func ArmSwapperSetAllSwitchersLater(why: String, delay: Float) {
     let player: ref<PlayerPuppet> = this.m_playerPuppet as PlayerPuppet;
     if !IsDefined(player) { return; }
+    let now: Float = ArmSwapperNow(player.GetGame());
+    let waiting: Bool = this.m_armSwapperSwitchersDue > 0.0;
+    let due: Float = now + delay;
+    if waiting && this.m_armSwapperSwitchersDue > due { due = this.m_armSwapperSwitchersDue; }
+    this.m_armSwapperSwitchersDue = due;
+    if !waiting || Equals(this.m_armSwapperSwitchersWhy, "") {
+        this.m_armSwapperSwitchersWhy = why;
+    } else if !StrContains(this.m_armSwapperSwitchersWhy, why) {
+        this.m_armSwapperSwitchersWhy += " + " + why;
+    }
+    if waiting {
+        ArmSwapperLog(player.GetGame(), "switcher pass joined (" + why + "), runs in " + FloatToStringPrec(due - now, 2) + "s");
+    }
+    this.m_armSwapperSwitchersGen += 1;
     let later: ref<ArmSwapperSetSwitchersCallback> = new ArmSwapperSetSwitchersCallback();
     later.system = this;
-    later.why = why;
-    GameInstance.GetDelaySystem(player.GetGame()).DelayCallback(later, delay, false);
+    later.gen = this.m_armSwapperSwitchersGen;
+    GameInstance.GetDelaySystem(player.GetGame()).DelayCallback(later, due - now, false);
+}
+
+// Runs the waiting switcher pass if it is due and nothing is settling. Returns 0 when done (it ran,
+// or a newer callback owns the pass), otherwise the seconds to wait before asking again.
+@addMethod(CyberwareCustomizationSystem)
+public func ArmSwapperRunSwitchersIfDue(gen: Int32) -> Float {
+    if gen != this.m_armSwapperSwitchersGen || this.m_armSwapperSwitchersDue <= 0.0 { return 0.0; }
+    let player: ref<PlayerPuppet> = this.ArmSwapperPlayer();
+    if !IsDefined(player) { return 0.0; }
+    let left: Float = this.m_armSwapperSwitchersDue - ArmSwapperNow(player.GetGame());
+    if left > 0.05 { return left; }
+    // A swap still settling, or the Glamdoc open again: try a moment later
+    let memory: ref<SimpleArmSwapperStyleMemory> = SimpleArmSwapperStyleMemory.Get(player.GetGame());
+    if player.m_armSwapperSwapSince > 0.0 || (IsDefined(memory) && memory.glamdocOpen) { return 1.0; }
+    let why: String = NotEquals(this.m_armSwapperSwitchersWhy, "") ? this.m_armSwapperSwitchersWhy : "save loaded";
+    this.m_armSwapperSwitchersDue = 0.0;
+    this.m_armSwapperSwitchersWhy = "";
+    this.ArmSwapperSetAllSwitchers(why);
+    return 0.0;
 }
 
 public class ArmSwapperSetSwitchersCallback extends DelayCallback {
     public let system: wref<CyberwareCustomizationSystem>;
-    public let why: String;
+    public let gen: Int32;
 
     public func Call() -> Void {
         let system: ref<CyberwareCustomizationSystem> = this.system;
         if !IsDefined(system) { return; }
+        let wait: Float = system.ArmSwapperRunSwitchersIfDue(this.gen);
         let player: ref<PlayerPuppet> = system.ArmSwapperPlayer();
-        // A swap still settling, or the Glamdoc open again: try a moment later
-        let memory: ref<SimpleArmSwapperStyleMemory> = IsDefined(player) ? SimpleArmSwapperStyleMemory.Get(player.GetGame()) : null;
-        if IsDefined(player) && (player.m_armSwapperSwapSince > 0.0 || (IsDefined(memory) && memory.glamdocOpen)) {
-            GameInstance.GetDelaySystem(player.GetGame()).DelayCallback(this, 1.0, false);
-            return;
+        if wait > 0.0 && IsDefined(player) {
+            GameInstance.GetDelaySystem(player.GetGame()).DelayCallback(this, wait, false);
         }
-        system.ArmSwapperSetAllSwitchers(NotEquals(this.why, "") ? this.why : "save loaded");
     }
+}
+
+// The reason passed to ArmSwapperColoursPainted for a switcher pass (several reasons when requests joined)
+public func ArmSwapperSwitchersReason(why: String) -> CName {
+    if StrContains(why, "save loaded") { return n"load"; }
+    if StrContains(why, "glamdoc closed") { return n"glamdocClosed"; }
+    if StrContains(why, "style changed") { return n"styleChanged"; }
+    if StrContains(why, "top changed") { return n"topChanged"; }
+    return n"styleChanged";
 }
 
 // Each arm type has a style switcher of its own in V's character customization (mantis, monowire,
@@ -1367,8 +1424,7 @@ public func ArmSwapperSetAllSwitchers(why: String) {
         }
     }
     // The arms in use keep their colours
-    this.SetCustomizationParameters(this.savedData.enabled, Color.ToLinear(CyberwareCustomizationPersistentData.GetPrimaryColor(this.savedData)),
-        Color.ToLinear(CyberwareCustomizationPersistentData.GetSecondaryColor(this.savedData)));
+    this.ArmSwapperPaintSaved(ArmSwapperSwitchersReason(why));
     // Native styling: the style changes can leave other arm types' pieces on V, with no arms attaching
     // to tidy them away
     ArmSwapperTidyWornNow(player, "switchers set");
@@ -3022,12 +3078,44 @@ public func ArmSwapperHideStrayLauncher(player: ref<PlayerPuppet>, owner: ref<Ga
 @if(!ModuleExists("Codeware"))
 public func ArmSwapperHideStrayLauncher(player: ref<PlayerPuppet>, owner: ref<GameObject>) {}
 
+// Every colour change the mod makes itself goes through here, so other mods hear about it
+@addMethod(CyberwareCustomizationSystem)
+public func ArmSwapperPaint(enabled: Bool, primary: Color, secondary: Color, why: CName) {
+    this.SetCustomizationParameters(enabled, primary, secondary);
+    // The arms these colours are for: the launcher while it is out, otherwise V's active arms
+    let armsType: Int32 = -1;
+    if Equals(why, n"launcherOut") {
+        armsType = 0;
+    } else if IsDefined(this.m_playerPuppet) {
+        let eqData: ref<EquipmentSystemPlayerData> = EquipmentSystem.GetData(this.m_playerPuppet);
+        if IsDefined(eqData) { armsType = ArmSwapperArmsType(eqData.GetActiveMeleeWare()); }
+    }
+    this.ArmSwapperColoursPainted(why, armsType);
+}
+
+// The brand colours of the style in use (or none), as the game would paint them
+@addMethod(CyberwareCustomizationSystem)
+public func ArmSwapperPaintSaved(why: CName) {
+    this.ArmSwapperPaint(this.savedData.enabled, Color.ToLinear(CyberwareCustomizationPersistentData.GetPrimaryColor(this.savedData)),
+        Color.ToLinear(CyberwareCustomizationPersistentData.GetSecondaryColor(this.savedData)), why);
+}
+
+// For other mods: runs right after Simple Arm Swapper has set the arm colours itself with
+// SetCustomizationParameters (a swap, a save load, the Glamdoc closing, the launcher drawn or put
+// away...). A mod that paints its own colours can observe this (CET: ObserveAfter('CyberwareCustomizationSystem',
+// 'ArmSwapperColoursPainted', ...)) and paint them again. why: load, swap, noStyle, glamdocClosed, topChanged,
+// styleChanged, launcherOut, launcherAway, styleKept. armsType: the arms the colours are for, 0 Projectile
+// Launch System, 1 Mantis Blades, 2 Monowire, 3 Gorilla Arms, -1 none or unknown
+@addMethod(CyberwareCustomizationSystem)
+public func ArmSwapperColoursPainted(why: CName, armsType: Int32) {
+    ArmSwapperLog(this.GetGameInstance(), "colours painted (" + NameToString(why) + ", arm type " + IntToString(armsType) + ")");
+}
+
 @wrapMethod(CyberwareCustomizationSystem)
 public func RestoreCyberwareCustomization(forcePlayerCustomization: Bool) {
     if this.ArmSwapperHoldsBackSwitcher(this.savedData.switcherName) {
         // Saved and coloured as usual, only the switcher is left alone
-        this.SetCustomizationParameters(this.savedData.enabled, Color.ToLinear(CyberwareCustomizationPersistentData.GetPrimaryColor(this.savedData)),
-            Color.ToLinear(CyberwareCustomizationPersistentData.GetSecondaryColor(this.savedData)));
+        this.ArmSwapperPaintSaved(n"styleKept");
         ArmSwapperLog(this.GetGameInstance(), "launcher style kept off V beside melee arms: " + ArmSwapperStyleDataText(this.savedData));
         return;
     }
@@ -3059,8 +3147,7 @@ public func ArmSwapperLauncherColours(launcherOut: Bool) {
     if !launcherOut {
         if !this.m_armSwapperLauncherColoursOn { return; }
         this.m_armSwapperLauncherColoursOn = false;
-        this.SetCustomizationParameters(this.savedData.enabled, Color.ToLinear(CyberwareCustomizationPersistentData.GetPrimaryColor(this.savedData)),
-            Color.ToLinear(CyberwareCustomizationPersistentData.GetSecondaryColor(this.savedData)));
+        this.ArmSwapperPaintSaved(n"launcherAway");
         ArmSwapperLog(this.GetGameInstance(), "launcher away: colours of the arms in use back. " + ArmSwapperStyleDataText(this.savedData));
         return;
     }
@@ -3072,8 +3159,8 @@ public func ArmSwapperLauncherColours(launcherOut: Bool) {
     if !IsDefined(record) || !IsDefined(record.BrandHandle()) { return; }
     let primary: Color = CyberwareCustomizationHelper.GetColorFromBrandData(record.BrandHandle(), Cast<Uint8>(memory.GetPrimaryColor(0)));
     let secondary: Color = CyberwareCustomizationHelper.GetColorFromBrandData(record.BrandHandle(), Cast<Uint8>(memory.GetSecondaryColor(0)));
-    this.SetCustomizationParameters(true, Color.ToLinear(primary), Color.ToLinear(secondary));
     this.m_armSwapperLauncherColoursOn = true;
+    this.ArmSwapperPaint(true, Color.ToLinear(primary), Color.ToLinear(secondary), n"launcherOut");
     ArmSwapperLog(this.GetGameInstance(), "launcher out: its colours " + ArmSwapperColorText(primary) + " and " + ArmSwapperColorText(secondary)
         + " (" + ArmSwapperName(styleItem) + ")");
 }

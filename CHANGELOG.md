@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.0.2
+
+Fixed a crash when leaving a ripperdoc after changing cyberware or styles. Leaving the chair sent the mod several "set the arm styles" requests within a second, while the game was still rebuilding V, and the mod handled each one on its own. Requests that arrive close together now join up, and the styles are set once, a few seconds after things have settled.
+
+NEW! Mods that paint their own arm colours can now hear when Simple Arm Swapper sets the colours (after a swap, a save load, the Glamdoc, a ripperdoc or the Projectile Launch System), together with the arm type, so they can put theirs back on top. Details for mod authors are in the README.
+
 ## 3.0.1
 
 The Nexus download now includes Simple Arm Swapper Native, the small plugin that lets every arm type keep its Glamdoc style. It was missing from the 3.0.0 file on Nexus, so arms outside the first arm slot (often the Projectile Launch System) showed their plain look. Update and your styles show on all your arms. Thank you to the player who reported it and helped track it down!

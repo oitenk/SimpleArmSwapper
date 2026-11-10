@@ -2,7 +2,7 @@
 
 A Cyberpunk 2077 mod for swapping between multiple sets of arm cyberware on the fly, without visiting a Ripperdoc.
 
-Current version: **3.0.1**, for Cyberpunk 2077 2.5.
+Current version: **3.0.2**, for Cyberpunk 2077 2.5.
 
 ## Features
 
@@ -92,7 +92,9 @@ The mod's on-screen text goes through Codeware's localization system, with Engli
 
 ## For mod authors
 
-Other scripts can check that Simple Arm Swapper is installed with `@if(ModuleExists("SimpleArmSwapperMod"))`. The module also provides `Version()`, which returns the version as a string. Since 3.0.0 the game styles the arms itself and the style piece table is gone; `ArmSwapperStylePiece`, `ArmSwapperStylePieceNew` and `SimpleArmSwapperStyleMemory.ArmSwapperStylePieces()` are kept so mods built against older versions still compile, but the table is always empty.
+Other scripts can check that Simple Arm Swapper is installed with `@if(ModuleExists("SimpleArmSwapperMod"))`. The module also provides `Version()`, which returns the version as a string.
+
+Mods that paint their own arm colours: to keep each arm type's style and colours, Simple Arm Swapper sets the arm colours itself with `CyberwareCustomizationSystem.SetCustomizationParameters` (after a swap, about 12 seconds after a save loads, after the Glamdoc closes, when V's top changes, and when the Projectile Launch System is drawn or put away). Right after each of these it calls `CyberwareCustomizationSystem.ArmSwapperColoursPainted(why: CName, armsType: Int32)`, so your mod can paint its colours again. From CET: `ObserveAfter('CyberwareCustomizationSystem', 'ArmSwapperColoursPainted', function(self, why, armsType) ... end)`; from redscript, wrap the method. `why` is one of `load`, `swap`, `noStyle`, `glamdocClosed`, `topChanged`, `styleChanged`, `launcherOut`, `launcherAway` or `styleKept`. `armsType` is the arm cyberware the colours are for, so a mod can keep colours per arm type: `0` Projectile Launch System (while it is out), `1` Mantis Blades, `2` Monowire, `3` Gorilla Arms, `-1` none. Since 3.0.0 the game styles the arms itself and the style piece table is gone; `ArmSwapperStylePiece`, `ArmSwapperStylePieceNew` and `SimpleArmSwapperStyleMemory.ArmSwapperStylePieces()` are kept so mods built against older versions still compile, but the table is always empty.
 
 ## Changelog
 
