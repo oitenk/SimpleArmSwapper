@@ -1,5 +1,5 @@
 // r6/scripts/simple_arm_swapper/SimpleArmSwapper.reds
-// Simple Arm Swapper v3.0.2
+// Simple Arm Swapper v3.1.0
 
 // Other mods can detect this one with @if(ModuleExists("SimpleArmSwapperMod"))
 module SimpleArmSwapperMod
@@ -7,7 +7,17 @@ module SimpleArmSwapperMod
 @if(ModuleExists("Codeware.Localization"))
 import Codeware.Localization.*
 
-public func Version() -> String = "3.0.2"
+@if(ModuleExists("EquipmentEx"))
+import EquipmentEx.OutfitSystem
+
+public func Version() -> String = "3.1.0"
+
+// Which version of a Glamdoc style V's arms wear: the one for short or for long sleeves
+enum ArmSwapperSleeveVersion {
+    Automatic = 0,
+    AlwaysShort = 1,
+    AlwaysLong = 2
+}
 
 // Options shown in the Mod Settings menu. Mod Settings is optional: when it is installed it
 // writes the saved choice into this class's default values (at startup and whenever the
@@ -34,6 +44,14 @@ public class SimpleArmSwapperSettings {
     @runtimeProperty("ModSettings.displayName", "Hide Nail Items Under Gorilla Arms")
     @runtimeProperty("ModSettings.description", "Gorilla Arms cover V's hands, so nail items worn in Equipment-EX's fingernail slots are hidden while V wears them, drawn or put away. Turn off to always show them.")
     public let hideNailItemsUnderGorillaArms: Bool = true;
+
+    @runtimeProperty("ModSettings.mod", "Simple Arm Swapper")
+    @runtimeProperty("ModSettings.displayName", "Sleeve Version Of Styles")
+    @runtimeProperty("ModSettings.description", "Some Glamdoc styles have a shorter version that fits under long sleeves. Automatic picks it from the top V wears, including the clothes of an active Equipment-EX outfit. Clothes from mods are not always marked as long-sleeved: pick Always Short or Always Long to decide yourself.")
+    @runtimeProperty("ModSettings.displayValues.Automatic", "Automatic")
+    @runtimeProperty("ModSettings.displayValues.AlwaysShort", "Always Short")
+    @runtimeProperty("ModSettings.displayValues.AlwaysLong", "Always Long")
+    public let sleeveVersion: ArmSwapperSleeveVersion = ArmSwapperSleeveVersion.Automatic;
 
     // The name must match overridableUI in r6/input/SimpleArmSwapper.xml
     @runtimeProperty("ModSettings.mod", "Simple Arm Swapper")
@@ -141,6 +159,19 @@ public class ArmSwapperPadListener {
     }
 }
 
+// Mod Settings (optional) tells the mod when one of its options changes
+@if(ModuleExists("ModSettingsModule"))
+public func ArmSwapperListenToSettings(listener: ref<IScriptable>, listen: Bool) {
+    if listen {
+        ModSettings.RegisterListenerToModifications(listener);
+    } else {
+        ModSettings.UnregisterListenerToModifications(listener);
+    }
+}
+
+@if(!ModuleExists("ModSettingsModule"))
+public func ArmSwapperListenToSettings(listener: ref<IScriptable>, listen: Bool) {}
+
 public class SimpleArmSwapper extends ScriptableSystem {
 
     private let m_padListener: ref<ArmSwapperPadListener>;
@@ -151,6 +182,24 @@ public class SimpleArmSwapper extends ScriptableSystem {
         this.m_padListener = new ArmSwapperPadListener();
         this.m_padListener.player = player;
         player.RegisterInputListener(this.m_padListener, n"CycleArmCyberware");
+    }
+
+    private func OnAttach() -> Void {
+        ArmSwapperListenToSettings(this, true);
+    }
+
+    private func OnDetach() -> Void {
+        ArmSwapperListenToSettings(this, false);
+    }
+
+    // Mod Settings calls this when an option was changed and applied. A new Sleeve Version shows
+    // right away: every arm type's style is set again for it.
+    public cb func OnModVariableChangeAccepted(groupPath: CName, varName: CName) -> Void {
+        if !Equals(varName, n"sleeveVersion") || !(new SimpleArmSwapperSettings()).stylePerArmType { return; }
+        let game: GameInstance = this.GetGameInstance();
+        ArmSwapperLog(game, "Sleeve Version changed in Mod Settings, setting the arm styles again");
+        let system: ref<CyberwareCustomizationSystem> = GameInstance.GetScriptableSystemsContainer(game).Get(n"CyberwareCustomizationSystem") as CyberwareCustomizationSystem;
+        if IsDefined(system) { system.ArmSwapperSetAllSwitchersLater("top changed", 0.5); }
     }
 
     // Returns every equipped arm cyberware carrying the 'Meleeware' tag, in slot order
@@ -1018,25 +1067,44 @@ private final func OnPotentiallyRefreshMaxTacApperance(request: ref<PotentiallyR
     let player: ref<PlayerPuppet> = this.m_playerPuppet as PlayerPuppet;
     if !IsDefined(player) { return; }
     let game: GameInstance = this.GetGameInstance();
-    if ArmSwapperNow(game) - player.m_armSwapperAttachTime < 30.0 {
-        ArmSwapperLog(game, "MaxTac check by the game shortly after loading (flag " + BoolToString(before) + " -> "
-            + BoolToString(this.savedData.hasMaxTacApperanceEquipped) + "); applying the style rule in 10 s");
-        let callback: ref<ArmSwapperMaxTacLaterCallback> = new ArmSwapperMaxTacLaterCallback();
-        callback.player = player;
-        callback.before = before;
-        GameInstance.GetDelaySystem(game).DelayCallback(callback, 10.0, false);
+    // In the Glamdoc the rule applies at once, before the menu reads the style
+    let memory: ref<SimpleArmSwapperStyleMemory> = SimpleArmSwapperStyleMemory.Get(game);
+    if IsDefined(memory) && memory.glamdocOpen {
+        this.ArmSwapperMaxTacOverStyle(before);
         return;
     }
-    this.ArmSwapperMaxTacOverStyle(before);
+    // Elsewhere it waits a moment: the holstered blades appear while the game is still rebuilding V
+    // (getting on a bike, for one), and switching the style in the middle of that could crash the
+    // game. Checks that come in meanwhile share the one waiting callback.
+    let delay: Float = ArmSwapperNow(game) - player.m_armSwapperAttachTime < 30.0 ? 10.0 : 1.0;
+    ArmSwapperLog(game, "MaxTac check by the game (flag " + BoolToString(before) + " -> "
+        + BoolToString(this.savedData.hasMaxTacApperanceEquipped) + "); applying the style rule in " + FloatToStringPrec(delay, 0) + " s");
+    player.m_armSwapperMaxTacGen += 1;
+    let callback: ref<ArmSwapperMaxTacLaterCallback> = new ArmSwapperMaxTacLaterCallback();
+    callback.player = player;
+    callback.before = before;
+    callback.gen = player.m_armSwapperMaxTacGen;
+    GameInstance.GetDelaySystem(game).DelayCallback(callback, delay, false);
 }
+
+// Only the newest waiting MaxTac style rule runs
+@addField(PlayerPuppet)
+public let m_armSwapperMaxTacGen: Int32;
 
 public class ArmSwapperMaxTacLaterCallback extends DelayCallback {
     public let player: wref<PlayerPuppet>;
     public let before: Bool;
+    public let gen: Int32;
 
     public func Call() -> Void {
         let player: ref<PlayerPuppet> = this.player;
-        if !IsDefined(player) { return; }
+        if !IsDefined(player) || this.gen != player.m_armSwapperMaxTacGen { return; }
+        // A swap is still bringing its arms out: once more, a moment later
+        let now: Float = ArmSwapperNow(player.GetGame());
+        if (player.m_armSwapperSwapSince > 0.0 && now - player.m_armSwapperSwapSince < 1.5) || now < player.m_armSwapperSettledAt {
+            GameInstance.GetDelaySystem(player.GetGame()).DelayCallback(this, 0.5, false);
+            return;
+        }
         let system: ref<CyberwareCustomizationSystem> = GameInstance.GetScriptableSystemsContainer(player.GetGame()).Get(n"CyberwareCustomizationSystem") as CyberwareCustomizationSystem;
         if IsDefined(system) {
             system.ArmSwapperMaxTacOverStyle(this.before);
@@ -1136,6 +1204,7 @@ public func ArmSwapperApplyStyleFor(armsItem: ItemID, opt fromGlamdoc: Bool) {
         // rebuilds the preview character for the new arms after a style switch.
         if fromGlamdoc && NotEquals(ownSwitcher, n"None") && !this.ArmSwapperHoldsBackSwitcher(ownSwitcher) {
             this.SetIndexForCustomizationSwitcher(ownSwitcher, Cast<Uint32>(0), true);
+            this.ArmSwapperNoteSwitcherSent(ownSwitcher, 0, false);
             ArmSwapperCheckHeadSoon(player, "after style switcher reset");
         }
         let noColor: Color;
@@ -1261,6 +1330,7 @@ private final func PlayerAttachedCallback(playerPuppet: ref<GameObject>) {
     this.m_armSwapperSwitchersDue = 0.0;
     this.m_armSwapperSwitchersWhy = "";
     this.m_armSwapperSwitchersGen += 1;
+    this.ArmSwapperForgetSwitchersSent();
     this.ArmSwapperListenForLauncher(playerPuppet);
     ArmSwapperStartHeadWatch(attached);
     this.ArmSwapperRememberCurrentStyle();
@@ -1285,6 +1355,46 @@ private let m_armSwapperSwitchersWhy: String;
 // Only the newest waiting callback may run the pass; older ones see a different number and stop
 @addField(CyberwareCustomizationSystem)
 private let m_armSwapperSwitchersGen: Int32;
+
+// The option each style switcher was last sent this session, and whether it went through the game's
+// MaxTac version. A switcher pass only sends the switchers whose option changed: every send makes
+// the game rebuild V's arms, and the fewer of those the better. Forgotten when a save loads and
+// when the Glamdoc closes (its previews change switchers without passing through here).
+@addField(CyberwareCustomizationSystem)
+private let m_armSwapperSentName: array<CName>;
+
+@addField(CyberwareCustomizationSystem)
+private let m_armSwapperSentIndex: array<Int32>;
+
+@addField(CyberwareCustomizationSystem)
+private let m_armSwapperSentMaxTac: array<Bool>;
+
+@addMethod(CyberwareCustomizationSystem)
+public func ArmSwapperNoteSwitcherSent(switcher: CName, index: Int32, maxTac: Bool) {
+    if Equals(switcher, n"None") { return; }
+    let at: Int32 = ArrayFindFirst(this.m_armSwapperSentName, switcher);
+    if at < 0 {
+        ArrayPush(this.m_armSwapperSentName, switcher);
+        ArrayPush(this.m_armSwapperSentIndex, index);
+        ArrayPush(this.m_armSwapperSentMaxTac, maxTac);
+    } else {
+        this.m_armSwapperSentIndex[at] = index;
+        this.m_armSwapperSentMaxTac[at] = maxTac;
+    }
+}
+
+@addMethod(CyberwareCustomizationSystem)
+public func ArmSwapperSwitcherAlreadySent(switcher: CName, index: Int32, maxTac: Bool) -> Bool {
+    let at: Int32 = ArrayFindFirst(this.m_armSwapperSentName, switcher);
+    return at >= 0 && this.m_armSwapperSentIndex[at] == index && Equals(this.m_armSwapperSentMaxTac[at], maxTac);
+}
+
+@addMethod(CyberwareCustomizationSystem)
+public func ArmSwapperForgetSwitchersSent() {
+    ArrayClear(this.m_armSwapperSentName);
+    ArrayClear(this.m_armSwapperSentIndex);
+    ArrayClear(this.m_armSwapperSentMaxTac);
+}
 
 // Sets every arm type's switcher after the given delay, once no swap is settling and the Glamdoc is closed
 @addMethod(CyberwareCustomizationSystem)
@@ -1366,6 +1476,12 @@ public func ArmSwapperSetAllSwitchers(why: String) {
     let eqData: ref<EquipmentSystemPlayerData> = EquipmentSystem.GetData(player);
     if !IsDefined(eqData) { return; }
     let activeType: Int32 = ArmSwapperArmsType(eqData.GetActiveMeleeWare());
+    // The sleeves these styles are set for; the arms in use follow them first
+    let longSleeves: Bool = EquipmentSystemPlayerData.HasLongSleeves(player);
+    player.m_armSwapperSleeves = longSleeves ? 2 : 1;
+    this.ArmSwapperFollowSleeves(longSleeves);
+    ArmSwapperLog(this.GetGameInstance(), "switchers (" + why + "): sleeves " + (longSleeves ? "long" : "short") + ", Sleeve Version setting "
+        + IntToString(EnumInt((new SimpleArmSwapperSettings()).sleeveVersion)) + " (0 automatic, 1 always short, 2 always long)");
     // The launcher first, and only with native styling (without it, its style is kept off V beside
     // melee arms); then the melee arms. The active type goes last, so its switcher is the one the game
     // saw most recently and its painted nails are the ones on V.
@@ -1377,6 +1493,12 @@ public func ArmSwapperSetAllSwitchers(why: String) {
         t += 1;
     }
     if activeType >= 1 && activeType <= 3 { ArrayPush(order, activeType); }
+    // After a load and after the Glamdoc every switcher is sent; other passes (a top change, a
+    // ripperdoc) only send the ones whose option changed
+    if StrContains(why, "save loaded") || StrContains(why, "glamdoc closed") {
+        this.ArmSwapperForgetSwitchersSent();
+    }
+    let skipped: Int32 = 0;
     for armsType in order {
         if ItemID.IsValid(ArmSwapperEquippedArmsOfType(player, armsType)) {
             let switcher: CName = memory.GetKnownSwitcherName(armsType);
@@ -1410,7 +1532,13 @@ public func ArmSwapperSetAllSwitchers(why: String) {
                 let bladeRecord: ref<Item_Record> = TweakDBInterface.GetItemRecord(ItemID.GetTDBID(ArmSwapperEquippedArmsOfType(player, 1)));
                 maxTac = IsDefined(bladeRecord) && bladeRecord.TagsContains(n"SetMaxTacApperance");
             }
-            if NotEquals(switcher, n"None") {
+            // Already at this option, and for the blades the MaxTac look is as wanted: nothing to send
+            let alreadySent: Bool = this.ArmSwapperSwitcherAlreadySent(switcher, index, maxTac)
+                && (armsType != 1 || Equals(this.savedData.hasMaxTacApperanceEquipped, maxTac));
+            if NotEquals(switcher, n"None") && alreadySent {
+                skipped += 1;
+            }
+            if NotEquals(switcher, n"None") && !alreadySent {
                 if maxTac {
                     if !this.savedData.hasMaxTacApperanceEquipped { this.SetMaxTacApperance(); }
                     this.SetIndexForCustomizationSwitcherWithMaxTacAppearance(switcher, Cast<Uint32>(index), true);
@@ -1418,10 +1546,14 @@ public func ArmSwapperSetAllSwitchers(why: String) {
                     if armsType == 1 && this.savedData.hasMaxTacApperanceEquipped { this.RemoveMaxTacApperance(); }
                     this.SetIndexForCustomizationSwitcher(switcher, Cast<Uint32>(index), true);
                 }
+                this.ArmSwapperNoteSwitcherSent(switcher, index, maxTac);
                 ArmSwapperLog(this.GetGameInstance(), "switchers (" + why + "): " + NameToString(switcher) + " set to " + IntToString(index)
                     + (maxTac ? " with the MaxTac look" : ""));
             }
         }
+    }
+    if skipped > 0 {
+        ArmSwapperLog(this.GetGameInstance(), "switchers (" + why + "): " + IntToString(skipped) + " already at their option, not sent again");
     }
     // The arms in use keep their colours
     this.ArmSwapperPaintSaved(ArmSwapperSwitchersReason(why));
@@ -2784,6 +2916,123 @@ protected cb func OnUnmountingEvent(evt: ref<UnmountingEvent>) -> Bool {
     return result;
 }
 
+// ---------------------------------------------------------------------------
+// Long or short sleeves. Some Glamdoc styles have a second version that fits under long sleeves. The
+// game picks it from the clothes in its own torso, chest and outfit slots. While an Equipment-EX
+// outfit is active those clothes are hidden and V shows the outfit's clothes instead, so the game's
+// answer followed clothes nobody sees. The test below answers from the outfit's torso and body slots
+// then, for the game's own callers too (the Glamdoc, changing tops). Equipment-EX is optional. The
+// Sleeve Version setting can fix the answer, for clothes from mods that are not marked as long-sleeved.
+// ---------------------------------------------------------------------------
+
+@if(ModuleExists("EquipmentEx"))
+public func ArmSwapperOutfitActive(game: GameInstance) -> Bool {
+    let outfits: ref<OutfitSystem> = OutfitSystem.GetInstance(game);
+    return IsDefined(outfits) && outfits.IsActive();
+}
+
+@if(!ModuleExists("EquipmentEx"))
+public func ArmSwapperOutfitActive(game: GameInstance) -> Bool {
+    return false;
+}
+
+@if(ModuleExists("EquipmentEx"))
+public func ArmSwapperIsOutfitSlot(game: GameInstance, slot: TweakDBID) -> Bool {
+    let outfits: ref<OutfitSystem> = OutfitSystem.GetInstance(game);
+    return IsDefined(outfits) && outfits.IsOutfitSlot(slot);
+}
+
+@if(!ModuleExists("EquipmentEx"))
+public func ArmSwapperIsOutfitSlot(game: GameInstance, slot: TweakDBID) -> Bool {
+    return false;
+}
+
+@wrapMethod(EquipmentSystemPlayerData)
+public final static func HasLongSleeves(puppet: wref<ScriptedPuppet>) -> Bool {
+    let gameAnswer: Bool = wrappedMethod(puppet);
+    let choice: ArmSwapperSleeveVersion = (new SimpleArmSwapperSettings()).sleeveVersion;
+    if Equals(choice, ArmSwapperSleeveVersion.AlwaysShort) { return false; }
+    if Equals(choice, ArmSwapperSleeveVersion.AlwaysLong) { return true; }
+    let owner: ref<ScriptedPuppet> = puppet;
+    if !IsDefined(owner) || !ArmSwapperOutfitActive(owner.GetGame()) { return gameAnswer; }
+    // The outfit's clothes decide, by the same tags the game looks for
+    let ts: ref<TransactionSystem> = GameInstance.GetTransactionSystem(owner.GetGame());
+    let slots: array<TweakDBID> = [t"OutfitSlots.TorsoUnder", t"OutfitSlots.TorsoInner", t"OutfitSlots.TorsoMiddle",
+        t"OutfitSlots.TorsoOuter", t"OutfitSlots.TorsoAux", t"OutfitSlots.BodyUnder", t"OutfitSlots.BodyInner",
+        t"OutfitSlots.BodyMiddle", t"OutfitSlots.BodyOuter"];
+    for slot in slots {
+        let worn: ref<ItemObject> = ts.GetItemInSlot(owner, slot);
+        if IsDefined(worn) {
+            let data: wref<gameItemData> = worn.GetItemData();
+            if IsDefined(data) && (data.HasTag(n"LongSleeve") || data.HasTag(n"BodySuit")) { return true; }
+        }
+    }
+    return false;
+}
+
+// The sleeves V's arm styles were last set for: 0 not yet, 1 short, 2 long
+@addField(PlayerPuppet)
+public let m_armSwapperSleeves: Int32;
+
+@addField(PlayerPuppet)
+public let m_armSwapperOutfitGen: Int32;
+
+// A piece of an Equipment-EX outfit went on or came off (or the whole outfit, switched on or off). The
+// game does not look at its arm styles then, so the mod checks a moment later whether the sleeves
+// changed. One check for a burst of changes.
+public func ArmSwapperOutfitSlotChanged(player: ref<PlayerPuppet>, slot: TweakDBID) {
+    if !IsDefined(player) || !ArmSwapperIsOutfitSlot(player.GetGame(), slot) { return; }
+    if !(new SimpleArmSwapperSettings()).stylePerArmType { return; }
+    player.m_armSwapperOutfitGen += 1;
+    let later: ref<ArmSwapperOutfitChangedCallback> = new ArmSwapperOutfitChangedCallback();
+    later.player = player;
+    later.gen = player.m_armSwapperOutfitGen;
+    GameInstance.GetDelaySystem(player.GetGame()).DelayCallback(later, 1.0, false);
+}
+
+public class ArmSwapperOutfitChangedCallback extends DelayCallback {
+    public let player: wref<PlayerPuppet>;
+    public let gen: Int32;
+
+    public func Call() -> Void {
+        let player: ref<PlayerPuppet> = this.player;
+        if !IsDefined(player) || this.gen != player.m_armSwapperOutfitGen { return; }
+        let game: GameInstance = player.GetGame();
+        // While a save loads the outfit goes on too: look again once the pass after loading has run
+        let sinceAttach: Float = ArmSwapperNow(game) - player.m_armSwapperAttachTime;
+        if sinceAttach < 15.0 {
+            GameInstance.GetDelaySystem(game).DelayCallback(this, 15.5 - sinceAttach, false);
+            return;
+        }
+        // Sleeves as they were: nothing to do, and nothing is sent
+        let sleeves: Int32 = EquipmentSystemPlayerData.HasLongSleeves(player) ? 2 : 1;
+        if sleeves == player.m_armSwapperSleeves { return; }
+        ArmSwapperLog(game, "outfit changed: sleeves now " + (sleeves == 2 ? "long" : "short") + ", setting the arm styles' sleeve version");
+        let system: ref<CyberwareCustomizationSystem> = GameInstance.GetScriptableSystemsContainer(game).Get(n"CyberwareCustomizationSystem") as CyberwareCustomizationSystem;
+        if IsDefined(system) { system.ArmSwapperSetAllSwitchersLater("top changed", 0.0); }
+    }
+}
+
+// The style of the arms in use follows the sleeves: its saved option moves between the style's own
+// two versions. The game does this itself when a top in its own slots changes; this covers the rest
+// (an Equipment-EX outfit, the Sleeve Version setting, a style saved in the Glamdoc, which shows styles
+// in full). An option that is neither version was picked by another mod and is left alone.
+@addMethod(CyberwareCustomizationSystem)
+private func ArmSwapperFollowSleeves(longSleeves: Bool) {
+    if !this.savedData.enabled || !ItemID.IsValid(this.savedData.customizationItemID) { return; }
+    let record: ref<UIGlamdocCustomizationItem_Record> = TweakDBInterface.GetUIGlamdocCustomizationItemRecord(ItemID.GetTDBID(this.savedData.customizationItemID));
+    if !IsDefined(record) { return; }
+    let shortIndex: Int32 = record.CustomizationIndex();
+    let longIndex: Int32 = record.LongSleevesCustomizationIndex();
+    if longIndex == -1 || longIndex == shortIndex { return; }
+    let current: Int32 = Cast<Int32>(this.savedData.switcherIndex);
+    let wanted: Int32 = longSleeves ? longIndex : shortIndex;
+    if current == wanted || (current != shortIndex && current != longIndex) { return; }
+    this.savedData.switcherIndex = Cast<Uint32>(wanted);
+    ArmSwapperLog(this.GetGameInstance(), "style of the arms in use moved to its " + (longSleeves ? "long" : "short") + "-sleeve version (option "
+        + IntToString(wanted) + ")");
+}
+
 // Changing the top can switch long sleeves on or off. The game then re-sends the style of the arms in
 // use; with native styling the other arm types' styles are set again too (their long-sleeve
 // versions), and V is tidied, a moment later.
@@ -3016,6 +3265,7 @@ public class ArmSwapperLauncherSlotCallback extends AttachmentSlotsScriptCallbac
         if ArmSwapperNailsMatter(slot) {
             ArmSwapperGorillaNailsSoon(system.ArmSwapperPlayer());
         }
+        ArmSwapperOutfitSlotChanged(system.ArmSwapperPlayer(), slot);
     }
 
     public func OnItemUnequipped(slot: TweakDBID, item: ItemID) -> Void {
@@ -3027,6 +3277,7 @@ public class ArmSwapperLauncherSlotCallback extends AttachmentSlotsScriptCallbac
         if ArmSwapperNailsMatter(slot) {
             ArmSwapperGorillaNailsSoon(system.ArmSwapperPlayer());
         }
+        ArmSwapperOutfitSlotChanged(system.ArmSwapperPlayer(), slot);
     }
 }
 
@@ -3119,7 +3370,10 @@ public func RestoreCyberwareCustomization(forcePlayerCustomization: Bool) {
         ArmSwapperLog(this.GetGameInstance(), "launcher style kept off V beside melee arms: " + ArmSwapperStyleDataText(this.savedData));
         return;
     }
+    // The game picks its MaxTac version of the switch by this same test
+    let maxTacVersion: Bool = this.savedData.hasMaxTacApperanceEquipped || this.ShouldApplyMaxTacApperance();
     wrappedMethod(forcePlayerCustomization);
+    this.ArmSwapperNoteSwitcherSent(this.savedData.switcherName, Cast<Int32>(this.savedData.switcherIndex), maxTacVersion);
 }
 
 @addField(CyberwareCustomizationSystem)

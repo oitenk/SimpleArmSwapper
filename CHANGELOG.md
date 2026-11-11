@@ -1,5 +1,17 @@
 # Changelog
 
+## 3.1.0
+
+NEW! Arm styles follow the sleeves of your Equipment-EX outfit. Some Glamdoc styles have a shorter version that fits under long sleeves, and the game picks it from V's regular clothes, which are hidden while an outfit is active. The mod now looks at the outfit's clothes instead, the ones you see, and updates every arm type when the outfit changes. Equipment-EX stays optional.
+
+NEW! Mod Settings option "Sleeve Version Of Styles": Automatic (the default), Always Short or Always Long. Clothes from mods are not always marked as long-sleeved, so this lets you choose the version yourself.
+
+A style bought in the Glamdoc while V wears long sleeves now switches to its long-sleeve version as soon as the menu closes, for every arm type.
+
+The mod asks the game to rebuild V's arms less often. Changing your top or visiting a ripperdoc now only updates the arm types whose style really changed, and often that is none. Fewer rebuilds means less work for the game and less room for hiccups.
+
+With a style on MaxTac Mantis Blades, the mod now waits a moment before putting the style back after you get on a bike, so it no longer changes V's arms while the game is still busy with them. The MaxTac look can show for about a second first.
+
 ## 3.0.2
 
 Fixed a crash when leaving a ripperdoc after changing cyberware or styles. Leaving the chair sent the mod several "set the arm styles" requests within a second, while the game was still rebuilding V, and the mod handled each one on its own. Requests that arrive close together now join up, and the styles are set once, a few seconds after things have settled.
